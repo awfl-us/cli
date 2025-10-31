@@ -13,6 +13,7 @@ from pathlib import Path
 import uuid
 
 import awfl.utils as wf_utils
+from awfl.auth import ensure_active_account
 from awfl.response_handler import handle_response, set_session, get_session, get_latest_status
 from awfl.utils import log_lines, log_unique, trigger_workflow
 from pathspec import PathSpec
@@ -270,6 +271,8 @@ async def main():
         asyncio.create_task(handle_file_updates(queue, git_root))
     else:
         log_unique("ℹ️ No git repository detected; file watcher for ' ai:' diffs is disabled.")
+
+    ensure_active_account()
 
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     asyncio.create_task(consume_events_sse(scope="project"))

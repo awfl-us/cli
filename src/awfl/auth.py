@@ -222,7 +222,7 @@ def login_google_device() -> Dict[str, Any]:
     return cache["accounts"][key]
 
 
-def _ensure_active_account() -> Dict[str, Any]:
+def ensure_active_account() -> Dict[str, Any]:
     cache = _load_cache()
     key = cache.get("activeUserKey")
     if key and key in cache.get("accounts", {}):
@@ -275,7 +275,7 @@ def get_auth_headers() -> Dict[str, str]:
         headers["Authorization"] = f"Bearer {override}"
 
     else:
-      acct = _ensure_active_account()
+      acct = ensure_active_account()
       acct = _refresh_if_needed(acct)
       headers["Authorization"] = f"Bearer {acct['idToken']}"
 
