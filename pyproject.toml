@@ -45,20 +45,9 @@ awfl = "awfl_entry:main"
 awfl-cli = "awfl_entry:main"
 
 [tool.setuptools]
-# Mix a src package (awfl_cli) with top-level modules and the cmds package.
-package-dir = {"" = ".", "awfl_cli" = "src/awfl_cli"}
-# Ship the CLI's top-level modules so entrypoint can run cli/main.py runtime.
-py-modules = [
-  "main",
-  "auth",
-  "commands",
-  "consume_autofunds",
-  "consume_events_sse",
-  "events",
-  "state",
-  "awfl_entry",
-]
+# If you mix top-level .py modules and real packages, rely on find:
+include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["awfl_cli*", "cmds*", "response_handler*", "utils*", "consumer*"]
+where = ["."]
+include = ["*"]

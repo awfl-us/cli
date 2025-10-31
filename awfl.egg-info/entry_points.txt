@@ -1,3 +1,0 @@
-[console_scripts]
-awfl = awfl_entry:main
-awfl-cli = awfl_entry:main

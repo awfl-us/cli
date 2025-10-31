@@ -1,8 +1,0 @@
-prompt_toolkit
-watchdog
-aiohttp
-pathspec
-requests>=2.31
-google-cloud-pubsub
-google-auth
-packaging
