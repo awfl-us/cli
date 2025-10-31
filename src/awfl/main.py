@@ -1,8 +1,4 @@
 import os
-# Suppress noisy gRPC C-core INFO logs before any gRPC/PubSub imports
-os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
-OS_ENV_GRPC_TRACE = os.environ.setdefault("GRPC_TRACE", "")
-os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "0")  # optional: reduces fork handler logs
 
 import sys
 import asyncio
@@ -21,16 +17,11 @@ from response_handler import handle_response, set_session, get_session, get_late
 from utils import log_lines, log_unique, trigger_workflow
 from pathspec import PathSpec
 from commands import handle_command
-from consume_autofunds import consume_autofunds
 # from consume_cli_operations import consume_cli_operations
 from consumer import consume_events_sse
 from state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
 
 STATUS_URL = "http://localhost:5050/api/cli/status"
-PUBSUB_SUBSCRIPTION = "projects/topaigents/subscriptions/duel-mode-sub"
-PUBSUB_AUTOFUNDS_SUB = "projects/topaigents/subscriptions/autofunds-appointment-sub"
-PUBSUB_CLI_OPS_SUB = "projects/topaigents/subscriptions/cli-operations"
-
 
 def _detect_git_root() -> str | None:
     """Return absolute path to git repo root, or None if not in a repo."""
@@ -279,10 +270,6 @@ async def main():
         asyncio.create_task(handle_file_updates(queue, git_root))
     else:
         log_unique("ℹ️ No git repository detected; file watcher for ' ai:' diffs is disabled.")
-
-    # Replaced server polling with Pub/Sub consumers
-    asyncio.create_task(consume_autofunds(PUBSUB_AUTOFUNDS_SUB))
-    # asyncio.create_task(consume_cli_operations(PUBSUB_CLI_OPS_SUB))
 
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     asyncio.create_task(consume_events_sse(scope="project"))

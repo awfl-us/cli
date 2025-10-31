@@ -12,8 +12,7 @@ Entry point: main.py
 - Starts:
   - File system watcher (watchdog) that reads diffs vs HEAD and triggers cli-CommentAddedDev when any added line contains " ai:".
   - Pub/Sub consumers:
-    - consume_autofunds on projects/topaigents/subscriptions/autofunds-appointment-sub
-    - consume_cli_operations on projects/topaigents/subscriptions/cli-operations
+    - consumers/
 - Interactive prompt loop:
   - Shows recent log lines.
   - Accepts commands; if not a command, sends the text to the currently selected workflow (default cli-QuerySubmittedDev).
@@ -30,14 +29,11 @@ Session identity
 - response_handler.set_session(new_uuid) called at startup.
 
 Pub/Sub consumers
-- consume_cli_operations.py
+- consumers/
   - Subscribes to the given subscription and decodes message.data as JSON.
   - Filters by attributes.sessionId equal to get_session(); messages with payload.background == true bypass filtering (always processed). Legacy messages whose attributes.sessionId starts with "background-" are also treated as background for backward compatibility.
   - On process success: ACK. On failure or (non-background) session mismatch: NACK for redelivery.
   - Forwards the JSON to response_handler.handle_response.
-- consume_autofunds.py
-  - Subscribes to the given subscription and logs payload.
-  - Immediately schedules forward to http://localhost:5050/api/calls/autofunds/process-appointment and ACKs message right away (original behavior preserved).
 
 Response handling (response_handler/)
 - handle_response(data: dict)

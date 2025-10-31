@@ -8,11 +8,11 @@ version = "0.1.0"
 description = "AWFL: AI Workflows CLI"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 authors = [
-  { name = "TopAigents" }
+  { name = "Paul Lorenz" }
 ]
-keywords = ["ai", "workflows", "cli", "gcp", "serverless"]
+keywords = ["ai", "workflows", "cli", "serverless", "agents"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -31,23 +31,21 @@ dependencies = [
   "aiohttp",
   "pathspec",
   "requests>=2.31",
-  "google-cloud-pubsub",
   "google-auth",
-  "packaging",
+  "packaging"
 ]
 
 [project.urls]
-Homepage = "https://github.com/TopAigents/TopAigents"
-Issues = "https://github.com/TopAigents/TopAigents/issues"
+Homepage = "https://github.com/awfl-us/cli"
+Issues = "https://github.com/awfl-us/cli/issues"
 
 [project.scripts]
-awfl = "awfl_entry:main"
-awfl-cli = "awfl_entry:main"
+awfl = "awfl.awfl_entry:main"
+awfl-cli = "awfl.awfl_entry:main"
 
 [tool.setuptools]
-# If you mix top-level .py modules and real packages, rely on find:
+package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["*"]
+where = ["src"]
