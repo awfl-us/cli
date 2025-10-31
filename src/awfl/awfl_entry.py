@@ -3,7 +3,5 @@
 
 import runpy
 
-def main() -> None:  # console_scripts target
-    # Execute the installed 'main' module as if run via `python -m main`
-    # This will trigger the top-level asyncio.run(main()) inside cli/main.py
-    runpy.run_module("main", run_name="__main__")
+def main():
+    runpy.run_module("awfl.main", run_name="__main__")
