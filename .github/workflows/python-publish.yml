@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF##*/}"
+          VERSION="${VERSION#v}"
+          echo "Setting version to $VERSION"
+          sed -i.bak "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          cat pyproject.toml
+
       - name: Build release distributions
         run: |
           # NOTE: put your own distribution build steps here.
