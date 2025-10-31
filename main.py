@@ -1,0 +1,333 @@
+import os
+# Suppress noisy gRPC C-core INFO logs before any gRPC/PubSub imports
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+OS_ENV_GRPC_TRACE = os.environ.setdefault("GRPC_TRACE", "")
+os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "0")  # optional: reduces fork handler logs
+
+import sys
+import asyncio
+import signal
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.patch_stdout import patch_stdout
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import subprocess
+import difflib
+from pathlib import Path
+import uuid
+
+import utils as wf_utils
+from response_handler import handle_response, set_session, get_session, get_latest_status
+from utils import log_lines, log_unique, trigger_workflow
+from pathspec import PathSpec
+from commands import handle_command
+from consume_autofunds import consume_autofunds
+# from consume_cli_operations import consume_cli_operations
+from consumer import consume_events_sse
+from state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
+
+STATUS_URL = "http://localhost:5050/api/cli/status"
+PUBSUB_SUBSCRIPTION = "projects/topaigents/subscriptions/duel-mode-sub"
+PUBSUB_AUTOFUNDS_SUB = "projects/topaigents/subscriptions/autofunds-appointment-sub"
+PUBSUB_CLI_OPS_SUB = "projects/topaigents/subscriptions/cli-operations"
+
+
+def _detect_git_root() -> str | None:
+    """Return absolute path to git repo root, or None if not in a repo."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+        )
+        root = (res.stdout or "").strip()
+        return root if root else None
+    except Exception:
+        return None
+
+
+class FileChangeHandler(FileSystemEventHandler):
+    def __init__(self, queue, loop, git_root: str | None):
+        self.queue = queue
+        self.loop = loop
+        self.git_root = git_root
+        self.spec = self._load_gitignore(git_root) if git_root else PathSpec.from_lines("gitwildmatch", [])
+        # Built-in safe ignores to avoid churn even if not listed in .gitignore
+        self._default_ignored_prefixes = (
+            ".git/", ".git", ".idea/", "node_modules/", ".venv/", "venv/", "__pycache__/"
+        )
+
+    def _load_gitignore(self, git_root: str):
+        try:
+            gitignore_path = os.path.join(git_root, ".gitignore")
+            patterns = []
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, "r", encoding="utf-8", errors="ignore") as f:
+                    patterns = f.read().splitlines()
+            return PathSpec.from_lines("gitwildmatch", patterns)
+        except Exception as e:
+            log_unique(f"⚠️ Failed to load .gitignore: {e}")
+            return PathSpec.from_lines("gitwildmatch", [])
+
+    def _is_under_root(self, path: str) -> bool:
+        if not self.git_root:
+            return False
+        try:
+            abs_path = str(Path(path).resolve())
+            common = os.path.commonpath([abs_path, self.git_root])
+            return common == self.git_root
+        except Exception:
+            return False
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        src = event.src_path
+        if not os.path.isfile(src):
+            return
+        # Only process files inside the current git repo
+        if not self._is_under_root(src):
+            return
+        if not self.is_ignored(src):
+            asyncio.run_coroutine_threadsafe(self.queue.put(src), self.loop)
+
+    def is_ignored(self, path: str) -> bool:
+        # If no git root is known, ignore everything (watcher should be disabled, but double-guard here)
+        if not self.git_root:
+            return True
+        try:
+            relative_path = os.path.relpath(path, self.git_root)
+            if relative_path.startswith(".."):
+                return True
+            # Built-in safe ignores
+            rp = relative_path.replace("\\", "/")
+            for pfx in self._default_ignored_prefixes:
+                if rp == pfx.rstrip("/") or rp.startswith(pfx):
+                    return True
+            if self.spec.match_file(relative_path):
+                return True
+        except Exception:
+            # Quietly ignore on errors to avoid log spam
+            return True
+        return False
+
+
+def _read_text_utf8_ignore(p: str) -> str:
+    try:
+        with open(p, "rb") as f:
+            data = f.read()
+        return data.decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def relative_to_git_root(filepath: str, git_root: str | None) -> str | None:
+    if not git_root:
+        return None
+    try:
+        return str(Path(filepath).resolve().relative_to(git_root))
+    except Exception:
+        return None
+
+
+async def handle_file_updates(queue, git_root: str | None):
+    while True:
+        path = await queue.get()
+        try:
+            # Skip if outside git repo (defensive)
+            git_path = relative_to_git_root(path, git_root)
+            if not git_path:
+                continue
+
+            new_content = _read_text_utf8_ignore(path)
+
+            # Read previous content from HEAD with binary-safe decoding
+            old_content = ""
+            try:
+                if git_root:
+                    result = subprocess.run(
+                        ["git", "-C", git_root, "show", f"HEAD:{git_path}"],
+                        capture_output=True,
+                        text=False,
+                        check=True,
+                    )
+                    old_content = (result.stdout or b"").decode("utf-8", errors="ignore")
+            except subprocess.CalledProcessError:
+                old_content = ""
+            except Exception:
+                old_content = ""
+
+            diff = '\n'.join(difflib.unified_diff(
+                (old_content or "").splitlines(),
+                (new_content or "").splitlines(),
+                fromfile="before",
+                tofile="after",
+                lineterm=""
+            ))
+
+            should_trigger = any(
+                line.startswith("+") and " ai:" in line
+                for line in diff.splitlines()
+            )
+
+            if should_trigger:
+                log_unique("⚡️ Trigger condition matched (found relevant diff).")
+                # Compute session as the base selected workflow name (no env suffix)
+                session_id = _compute_session_workflow_name()
+                # Pass base workflow name; environment suffixing handled centrally
+                trigger_workflow("cli-CommentAdded", {
+                    "sessionId": session_id,
+                    "filepath": path,
+                    "newContent": new_content,
+                    "diff": diff
+                })
+
+        except Exception as e:
+            # Keep this quiet and concise; noisy binary or non-repo files shouldn't spam logs
+            log_unique(f"⚠️ Error processing change for {path}: {e}")
+
+
+def _compute_session_workflow_name() -> str:
+    override = os.environ.get("ASSISTANT_WORKFLOW")
+    if override:
+        return normalize_workflow(override)
+    active_wf = normalize_workflow(get_active_workflow() or DEFAULT_WORKFLOW)
+    return active_wf
+
+
+def _dev_cleanup():
+    """Attempt to shut down dev resources (watcher, docker compose, ngrok)."""
+    try:
+        from cmds.dev.subcommands.stop import stop_dev
+        stop_dev([])
+    except Exception:
+        # Best-effort cleanup
+        pass
+
+
+def _rprompt():
+    # Dynamic right-side status: updates when the app is invalidated
+    status, _err = get_latest_status()
+    return f"({status})" if status else ""
+
+
+async def _refresh_prompt_task(session: PromptSession):
+    # Periodically invalidate the UI so rprompt updates even when idle
+    while True:
+        await asyncio.sleep(0.5)
+        try:
+            session.app.invalidate()
+        except Exception:
+            pass
+
+
+def _init_env_mode_from_argv():
+    # Detect "awfl dev" (or python cli/main.py dev). Default is prod (no suffix)
+    args = [a for a in sys.argv[1:] if a and not a.startswith("-")]
+    is_dev = len(args) > 0 and args[0].lower() == "dev"
+    if is_dev:
+        # Child processes and utils will read WORKFLOW_ENV
+        os.environ["WORKFLOW_ENV"] = "Dev"
+        wf_utils.log_unique("🏁 Starting awfl in Dev mode (WORKFLOW_ENV suffix 'Dev').")
+        try:
+            wf_utils.set_terminal_title("awfl [Dev]")
+        except Exception:
+            pass
+    else:
+        os.environ["WORKFLOW_ENV"] = ""
+        wf_utils.log_unique("🏁 Starting awfl in Prod mode (no WORKFLOW_ENV suffix).")
+        try:
+            wf_utils.set_terminal_title("awfl")
+        except Exception:
+            pass
+
+    # After mode set, log the effective API origin and execution mode for transparency
+    origin = wf_utils.get_api_origin()
+    exec_mode = os.getenv("WORKFLOW_EXEC_MODE", "api").lower()
+    override = os.getenv("API_ORIGIN")
+    if override:
+        wf_utils.log_unique(f"🌐 API origin: {origin} (overridden by API_ORIGIN)")
+    else:
+        wf_utils.log_unique(f"🌐 API origin: {origin}")
+    wf_utils.log_unique(f"🧭 Execution mode: {exec_mode}")
+
+
+async def main():
+    # Initialize session to the full selected workflow name (with env suffix)
+    initial_session = _compute_session_workflow_name()
+    set_session(initial_session)
+
+    queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    # Register signal handlers to ensure dev cleanup on SIGINT/SIGTERM
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _dev_cleanup)
+        except NotImplementedError:
+            # add_signal_handler not supported (e.g., on Windows); rely on finally
+            pass
+
+    # Detect repo root; only watch files inside the repo
+    git_root = _detect_git_root()
+    observer = None
+
+    if git_root:
+        event_handler = FileChangeHandler(queue, loop, git_root)
+        observer = Observer()
+        observer.schedule(event_handler, git_root, recursive=True)
+        observer.start()
+        log_unique(f"👀 Watching repo for changes: {git_root}")
+        asyncio.create_task(handle_file_updates(queue, git_root))
+    else:
+        log_unique("ℹ️ No git repository detected; file watcher for ' ai:' diffs is disabled.")
+
+    # Replaced server polling with Pub/Sub consumers
+    asyncio.create_task(consume_autofunds(PUBSUB_AUTOFUNDS_SUB))
+    # asyncio.create_task(consume_cli_operations(PUBSUB_CLI_OPS_SUB))
+
+    # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
+    asyncio.create_task(consume_events_sse(scope="project"))
+    asyncio.create_task(consume_events_sse(scope="session"))
+
+    session = PromptSession()
+    # Kick off periodic UI refresh so rprompt reflects current status during idle
+    asyncio.create_task(_refresh_prompt_task(session))
+
+    try:
+        with patch_stdout():
+            while True:
+                # Keep the response handler session aligned with current selection
+                set_session(_compute_session_workflow_name())
+
+                os.system('clear')
+                for line in log_lines:
+                    print_formatted_text(line)
+                # Show selected workflow; status is rendered live on the right via rprompt
+                active_wf = get_active_workflow() or DEFAULT_WORKFLOW
+                prompt_wf = normalize_workflow(active_wf)
+                text = await session.prompt_async(f"🤔 {prompt_wf} > ", rprompt=_rprompt)
+                if text.lower() == "exit":
+                    break
+                if handle_command(text):
+                    # After commands (like switching workflows), update session to match
+                    set_session(_compute_session_workflow_name())
+                    continue
+                workflow = get_active_workflow() or DEFAULT_WORKFLOW
+                workflow = normalize_workflow(workflow)
+                session_id = _compute_session_workflow_name()
+                # Log base workflow name; utils.trigger_workflow will handle env suffixing per mode
+                log_unique(f"🚀 Query submitted to {workflow} (session: {session_id}): {text}")
+                # Pass base workflow name; env suffixing handled centrally in utils.trigger_workflow
+                trigger_workflow(workflow, {
+                    "sessionId": session_id,
+                    "query": text
+                })
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if observer is not None:
+            observer.stop()
+            observer.join()
+
+if __name__ == "__main__":
+    _init_env_mode_from_argv()
+    asyncio.run(main())

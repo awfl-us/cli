@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awfl"
+version = "0.1.0"
+description = "AWFL: AI Workflows CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "TopAigents" }
+]
+keywords = ["ai", "workflows", "cli", "gcp", "serverless"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "prompt_toolkit",
+  "watchdog",
+  "aiohttp",
+  "pathspec",
+  "requests>=2.31",
+  "google-cloud-pubsub",
+  "google-auth",
+  "packaging",
+]
+
+[project.urls]
+Homepage = "https://github.com/TopAigents/TopAigents"
+Issues = "https://github.com/TopAigents/TopAigents/issues"
+
+[project.scripts]
+awfl = "awfl_entry:main"
+awfl-cli = "awfl_entry:main"
+
+[tool.setuptools]
+# Mix a src package (awfl_cli) with top-level modules and the cmds package.
+package-dir = {"" = ".", "awfl_cli" = "src/awfl_cli"}
+# Ship the CLI's top-level modules so entrypoint can run cli/main.py runtime.
+py-modules = [
+  "main",
+  "auth",
+  "commands",
+  "consume_autofunds",
+  "consume_events_sse",
+  "events",
+  "state",
+  "awfl_entry",
+]
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["awfl_cli*", "cmds*", "response_handler*", "utils*", "consumer*"]
