@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from typing import Optional
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 
 def _get_ngrok_existing_url() -> Optional[str]:

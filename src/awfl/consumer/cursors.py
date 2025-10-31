@@ -3,8 +3,8 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
-from auth import get_auth_headers
-from utils import get_api_origin, log_unique
+from awfl.auth import get_auth_headers
+from awfl.utils import get_api_origin, log_unique
 
 # Back-compat note:
 # The previous implementation persisted a local JSON file with a map of

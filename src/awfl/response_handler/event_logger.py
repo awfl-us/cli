@@ -1,7 +1,7 @@
 import json
 from typing import Optional, Dict, Any
 
-from utils import log_unique
+from awfl.utils import log_unique
 from .session_state import _update_status
 from .rh_utils import ts_to_ms, is_background_from_payload
 

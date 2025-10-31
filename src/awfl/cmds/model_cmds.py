@@ -1,5 +1,5 @@
 import os
-from utils import log_unique
+from awfl.utils import log_unique
 
 
 def get_or_set_model(arg: str | None) -> bool:

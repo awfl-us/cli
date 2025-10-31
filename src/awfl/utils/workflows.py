@@ -2,8 +2,8 @@ import os
 import requests
 from typing import Dict, Any
 
-from auth import get_auth_headers
-from state import set_active_execution, get_workflow_env_suffix as _state_get_env_suffix
+from awfl.auth import get_auth_headers
+from awfl.state import set_active_execution, get_workflow_env_suffix as _state_get_env_suffix
 
 from .logging import log_unique, _is_debug
 from .urls import get_api_origin

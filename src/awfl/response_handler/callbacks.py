@@ -9,7 +9,7 @@ import requests
 import google.auth
 from google.auth.transport.requests import Request as SyncRequest
 
-from utils import log_unique
+from awfl.utils import log_unique
 from .rh_utils import mask_headers
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Iterable, Tuple
 import tempfile
 
-from utils import log_unique
+from awfl.utils import log_unique
 from .paths import DevPaths
 from .dev_state import set_state
 

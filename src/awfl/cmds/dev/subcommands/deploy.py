@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import List
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from ..core import deploy_workflow
 

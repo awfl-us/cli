@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from ..core import discover_paths, generate_yamls, _short_display
 

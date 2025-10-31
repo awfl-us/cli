@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 
 def _config_dir() -> Path:

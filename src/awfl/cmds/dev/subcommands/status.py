@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import List
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from ..core import discover_paths, compose_status, get_state, _short_display, _env_suffix
 from ..core import _get_ngrok_existing_url

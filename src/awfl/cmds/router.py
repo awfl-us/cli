@@ -3,9 +3,9 @@ from __future__ import annotations
 import shlex
 from typing import Callable, Dict, List, Tuple
 
-from utils import log_unique
-from state import set_active_workflow
-from utils import trigger_workflow
+from awfl.utils import log_unique
+from awfl.state import set_active_workflow
+from awfl.utils import trigger_workflow
 
 from .workflows import ls_workflows_interactive
 from .exec_ctl import stop_or_cancel_active

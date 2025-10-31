@@ -7,7 +7,7 @@ import signal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from ..core import (
     DevPaths,

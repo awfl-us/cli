@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from utils import log_unique
+from awfl.utils import log_unique
 from .common import get_orig_cwd
 
 # Reuse dev core helpers for generation and deployment

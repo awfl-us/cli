@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 
 # ----------------------- Docker compose helpers -----------------------

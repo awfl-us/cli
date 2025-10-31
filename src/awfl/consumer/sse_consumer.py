@@ -5,10 +5,10 @@ from typing import Optional, Tuple
 
 import aiohttp
 
-from auth import get_auth_headers
-from response_handler import get_session
-from utils import get_api_origin, log_unique
-from events.workspace import resolve_project_id, get_or_create_workspace
+from awfl.auth import get_auth_headers
+from awfl.response_handler import get_session
+from awfl.utils import get_api_origin, log_unique
+from awfl.events.workspace import resolve_project_id, get_or_create_workspace
 
 from .cursors import get_resume_event_id, update_cursor
 from .sse_parser import SSEParser

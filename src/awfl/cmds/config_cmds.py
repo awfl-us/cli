@@ -1,5 +1,5 @@
 import os
-from utils import log_unique
+from awfl.utils import log_unique
 from .auth_cmds import print_whoami
 from .workflows import resolve_workflows_dir
 

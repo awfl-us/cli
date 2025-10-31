@@ -7,8 +7,8 @@ from typing import Optional, Tuple, Dict, Any
 
 import aiohttp
 
-from auth import get_auth_headers, set_project_id
-from utils import get_api_origin, log_unique
+from awfl.auth import get_auth_headers, set_project_id
+from awfl.utils import get_api_origin, log_unique
 
 # Local cache to avoid race/consistency issues when coordinating multiple consumers
 _PROJECT_CACHE_PATH = os.path.expanduser("~/.awfl/projects_by_remote.json")

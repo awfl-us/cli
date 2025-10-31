@@ -4,9 +4,9 @@ from typing import Dict, List, Optional
 
 import requests
 
-from state import set_active_workflow, get_active_workflow, normalize_workflow, get_workflow_env_suffix
-from utils import log_unique, get_api_origin, LOCATION
-from auth import get_auth_headers
+from awfl.state import set_active_workflow, get_active_workflow, normalize_workflow, get_workflow_env_suffix
+from awfl.utils import log_unique, get_api_origin, LOCATION
+from awfl.auth import get_auth_headers
 from .common import get_orig_cwd
 
 

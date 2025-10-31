@@ -3,8 +3,8 @@ import base64
 import json
 from typing import Dict
 
-from utils import log_unique
-from auth import get_auth_headers, login_google_device
+from awfl.utils import log_unique
+from awfl.auth import get_auth_headers, login_google_device
 
 
 def _decode_jwt_no_verify(token: str) -> Dict:

@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 
 def _prompt_yes_no(question: str, default: bool = True) -> bool:

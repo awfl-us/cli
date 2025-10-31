@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import requests
-from auth import get_auth_headers
-from utils import log_unique, _get_workflow_env_suffix, _ensure_env_suffix, get_api_origin
-from state import get_active_execution, clear_active_execution
+from awfl.auth import get_auth_headers
+from awfl.utils import log_unique, _get_workflow_env_suffix, _ensure_env_suffix, get_api_origin
+from awfl.state import get_active_execution, clear_active_execution
 
 
 def stop_or_cancel_active() -> bool:

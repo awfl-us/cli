@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import List
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from ..core import discover_paths, compose_down, stop_ngrok, compose_status
 from ..core import get_state, set_state

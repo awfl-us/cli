@@ -1,7 +1,7 @@
 import json
 from typing import Dict, Any, Optional, Literal
 
-from response_handler import handle_response, process_event
+from awfl.response_handler import handle_response, process_event
 
 Mode = Literal["execute", "log", "both"]
 

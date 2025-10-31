@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-from utils import log_unique
+from awfl.utils import log_unique
 
 from .callbacks import post_callback
 from .rh_utils import read_file_text_utf8_ignore, sanitize_shell_command

@@ -2,7 +2,7 @@ import os
 import time
 from typing import Optional, Tuple
 
-from state import get_active_workflow, normalize_workflow
+from awfl.state import get_active_workflow, normalize_workflow
 
 # Global session and status state
 _session_id: Optional[str] = None

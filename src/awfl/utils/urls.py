@@ -4,9 +4,9 @@ from typing import Optional
 
 from .logging import log_unique, _is_debug
 
-# We read the workflow env suffix directly from state to avoid circular deps
+# We read the workflow env suffix directly from awfl.state to avoid circular deps
 try:
-    from state import get_workflow_env_suffix as _state_get_env_suffix
+    from awfl.state import get_workflow_env_suffix as _state_get_env_suffix
 except Exception:  # pragma: no cover - during early bootstrap
     _state_get_env_suffix = lambda: os.getenv("WORKFLOW_ENV", "")  # type: ignore
 

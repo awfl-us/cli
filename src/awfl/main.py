@@ -12,14 +12,14 @@ import difflib
 from pathlib import Path
 import uuid
 
-import utils as wf_utils
-from response_handler import handle_response, set_session, get_session, get_latest_status
-from utils import log_lines, log_unique, trigger_workflow
+import awfl.utils as wf_utils
+from awfl.response_handler import handle_response, set_session, get_session, get_latest_status
+from awfl.utils import log_lines, log_unique, trigger_workflow
 from pathspec import PathSpec
-from commands import handle_command
+from awfl.commands import handle_command
 # from consume_cli_operations import consume_cli_operations
-from consumer import consume_events_sse
-from state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
+from awfl.consumer import consume_events_sse
+from awfl.state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
 
 STATUS_URL = "http://localhost:5050/api/cli/status"
 

@@ -5,7 +5,7 @@ import os
 import time
 from typing import Optional, Set, List
 
-from utils import log_unique
+from awfl.utils import log_unique
 from .paths import DevPaths
 from .yaml_ops import generate_for_classes, deploy_workflow, _class_path_from_scala_file
 

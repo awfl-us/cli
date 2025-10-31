@@ -1,6 +1,6 @@
 # Utils package public API re-exports
 # This exposes the same symbols previously imported from the monolithic utils.py
-# so existing imports like `from utils import log_unique` continue to work.
+# so existing imports like `from awfl.utils import log_unique` continue to work.
 
 from .logging import (
     log_lines,
