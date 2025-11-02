@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from awfl.utils import log_unique
+from awfl.auth import get_project_id
 
 
 def _config_dir() -> Path:
@@ -13,7 +14,7 @@ def _config_dir() -> Path:
 
 
 def _config_path() -> Path:
-    return _config_dir() / "dev_config.json"
+    return _config_dir() / f"dev_config_{get_project_id()}.json"
 
 
 def load_dev_config() -> Dict[str, Any]:

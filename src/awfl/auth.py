@@ -23,8 +23,8 @@ SCOPES = "openid email profile"
 
 _project_id: Optional[str] = None
 
-# def get_project_id():
-#     return _project_id
+def get_project_id():
+    return _project_id
 
 def set_project_id(project_id):
     global _project_id

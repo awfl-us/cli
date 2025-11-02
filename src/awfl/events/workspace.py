@@ -8,10 +8,10 @@ from typing import Optional, Tuple, Dict, Any
 import aiohttp
 
 from awfl.auth import get_auth_headers, set_project_id
-from awfl.utils import get_api_origin, log_unique
+from awfl.utils import get_api_origin, log_unique, _get_workflow_env_suffix
 
 # Local cache to avoid race/consistency issues when coordinating multiple consumers
-_PROJECT_CACHE_PATH = os.path.expanduser("~/.awfl/projects_by_remote.json")
+_PROJECT_CACHE_PATH = os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
 
 def _normalize_remote(remote: str) -> str:
     if not remote:

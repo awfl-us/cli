@@ -71,9 +71,7 @@ def _register_shutdown_hooks() -> None:
 
 
 def start_dev(args: List[str]) -> bool:
-    state = get_state()
-
-    # Defaults
+    # Defaults (lowest precedence)
     port = int(os.getenv("AWFL_NGROK_PORT", "8081") or 8081)
     auto_deploy = (os.getenv("AUTO_DEPLOY", "on").lower() != "off")
     use_ngrok = True
@@ -83,6 +81,18 @@ def start_dev(args: List[str]) -> bool:
     workflows_dir_override: Optional[str] = None
     location = os.getenv("AWFL_GCLOUD_LOCATION", "us-central1")
     project = os.getenv("PROJECT")
+
+    # Load persisted config early so CLI flags can override it (flags > config > env/defaults)
+    cfg: Dict[str, Any] = load_dev_config() or {}
+    port = int(cfg.get("ngrok_port", port))
+    auto_deploy = bool(cfg.get("auto_deploy", auto_deploy))
+    use_ngrok = bool(cfg.get("use_ngrok", use_ngrok))
+    use_compose = bool(cfg.get("use_compose", use_compose))
+    use_watch = bool(cfg.get("use_watch", use_watch))
+    location = cfg.get("location", location)
+    project = cfg.get("project", project)
+    compose_file_override = cfg.get("compose_file", compose_file_override)
+    workflows_dir_override = cfg.get("workflows_dir", workflows_dir_override)
 
     # Flags
     reconfigure = False
@@ -121,19 +131,6 @@ def start_dev(args: List[str]) -> bool:
             yes_all = True
         else:
             log_unique(f"ℹ️ Ignoring unknown flag: {tok}")
-
-    # Load persisted config (lowest precedence over flags)
-    cfg: Dict[str, Any] = load_dev_config() or {}
-    if not reconfigure:
-        port = int(cfg.get("ngrok_port", port))
-        auto_deploy = bool(cfg.get("auto_deploy", auto_deploy))
-        use_ngrok = bool(cfg.get("use_ngrok", use_ngrok))
-        use_compose = bool(cfg.get("use_compose", use_compose))
-        use_watch = bool(cfg.get("use_watch", use_watch))
-        location = cfg.get("location", location)
-        project = cfg.get("project", project)
-        compose_file_override = cfg.get("compose_file") or compose_file_override
-        workflows_dir_override = cfg.get("workflows_dir") or workflows_dir_override
 
     # Discover paths and apply overrides (from either flags or persisted cfg)
     paths = discover_paths()
@@ -231,7 +228,9 @@ def start_dev(args: List[str]) -> bool:
     from ..core import _get_ngrok_existing_url
     tunnel = _get_ngrok_existing_url()
     comp = compose_status(paths.compose_file)
-    watch = "running" if state.get("watcher_task") and not state.get("watcher_task").done() else "stopped"
+    # Re-fetch fresh state to reflect watcher_task set above
+    cur_state = get_state()
+    watch = "running" if cur_state.get("watcher_task") and not cur_state.get("watcher_task").done() else "stopped"
 
     log_unique(
         "Dev started with:\n"
