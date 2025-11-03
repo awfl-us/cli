@@ -30,8 +30,6 @@ Essential commands
   - Show execution mode, API origin, active workflow, and other runtime details.
 - use api | exec api
   - Use API mode to execute workflows via the server (default for most users).
-- use gcloud | exec gcloud
-  - Switch to gcloud execution (requires gcloud installed and configured).
 - auth login | login
   - Start Google device login and cache tokens for API calls.
 - whoami | auth status

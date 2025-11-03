@@ -7,20 +7,23 @@ from typing import Any, Dict
 
 from awfl.utils import log_unique
 from awfl.auth import get_project_id
+from awfl.events.workspace import repo_remote, _derive_project_name
 
 
 def _config_dir() -> Path:
     return Path(os.path.expanduser("~/.awfl"))
 
 
-def _config_path() -> Path:
-    return _config_dir() / f"dev_config_{get_project_id()}.json"
+def _config_path() -> Path | None:
+    repo = _derive_project_name(repo_remote())
+    if repo:
+      return _config_dir() / Path(repo) / f"dev_config.json"
 
 
 def load_dev_config() -> Dict[str, Any]:
     try:
         p = _config_path()
-        if p.exists():
+        if p and p.exists():
             with p.open("r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
@@ -30,9 +33,8 @@ def load_dev_config() -> Dict[str, Any]:
 
 def save_dev_config(cfg: Dict[str, Any]) -> None:
     try:
-        d = _config_dir()
-        d.mkdir(parents=True, exist_ok=True)
         p = _config_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, sort_keys=True)
         log_unique(f"📝 Saved dev config to {p}")

@@ -14,6 +14,11 @@ FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyCuwFP2SA6GPGfdKLl4S4T
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "85050401291-9lv9mf68b12md4q41rhra1fhgmfikdta.apps.googleusercontent.com"
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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" # optional, may be unused for public clients
 
+# New awfl-us
+# FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
+# GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
+# GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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"
+
 DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 FIREBASE_IDP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp"
@@ -21,6 +26,7 @@ FIREBASE_REFRESH_URL = "https://securetoken.googleapis.com/v1/token"
 
 SCOPES = "openid email profile"
 
+# This is the AWFL project id (server-side), not the GCP project
 _project_id: Optional[str] = None
 
 def get_project_id():
@@ -34,22 +40,60 @@ def _now() -> int:
     return int(time.time())
 
 
+def _resolve_gcp_project() -> str:
+    """Resolve the active GCP project for token scoping.
+    Source of truth: per-repo dev config (see awfl/cmds/dev/dev_config.py).
+    - Reads ~/.awfl/{repo_name()}/dev_config.json and uses key "project".
+    - Falls back to default "awfl-us" if missing.
+    """
+    try:
+        # Local import to avoid circular import at module import time
+        from awfl.cmds.dev.dev_config import load_dev_config
+        repo_cfg = load_dev_config() or {}
+        repo_proj = repo_cfg.get("project")
+        if isinstance(repo_proj, str) and repo_proj.strip():
+            return repo_proj.strip()
+    except Exception:
+        # If dev config cannot be loaded yet (e.g., project id not resolved), ignore
+        pass
+    return "awfl-us"
+
+
 def _load_cache() -> Dict[str, Any]:
     try:
         if CACHE_PATH.exists():
-            with open(CACHE_PATH, "r") as f:
-                return json.load(f)
+            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        else:
+            d = {}
     except Exception:
-        pass
-    return {"accounts": {}, "activeUserKey": None}
+        d = {}
+    # Normalize structure for backward compatibility
+    if not isinstance(d, dict):
+        d = {}
+    d.setdefault("accounts", {})            # legacy (global)
+    d.setdefault("activeUserKey", None)     # legacy (global)
+    d.setdefault("byProject", {})           # new: per GCP project buckets
+    return d
 
 
 def _save_cache(cache: Dict[str, Any]) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CACHE_PATH.with_suffix(".tmp")
-    with open(tmp, "w") as f:
-        json.dump(cache, f, indent=2)
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, sort_keys=True)
     tmp.replace(CACHE_PATH)
+
+
+def _project_bucket(cache: Dict[str, Any], gcp_project: str) -> Dict[str, Any]:
+    bp = cache.setdefault("byProject", {})
+    bucket = bp.get(gcp_project)
+    if not isinstance(bucket, dict):
+        bucket = {"accounts": {}, "activeUserKey": None}
+        bp[gcp_project] = bucket
+    bucket.setdefault("accounts", {})
+    bucket.setdefault("activeUserKey", None)
+    return bucket
 
 
 def _pick_account_key(email: Optional[str], local_id: str) -> str:
@@ -102,6 +146,8 @@ def _firebase_sign_in_with_google_id_token(google_id_token: str) -> Dict[str, An
         json=payload,
         timeout=30,
     )
+    if not r.ok:
+      print("🚨 Firebase sign-in failed:", r.status_code, r.text)
     r.raise_for_status()
     return r.json()
 
@@ -196,8 +242,9 @@ def _google_device_flow() -> str:
     raise TimeoutError("Google Device authorization timed out. Please try again.")
 
 
-def login_google_device() -> Dict[str, Any]:
-    """Run Google Device Flow and sign into Firebase. Returns the stored account record."""
+def login_google_device(gcp_project: Optional[str] = None) -> Dict[str, Any]:
+    """Run Google Device Flow and sign into Firebase. Returns the stored account record for the project."""
+    project = gcp_project or _resolve_gcp_project()
     google_id_token = _google_device_flow()
     fb = _firebase_sign_in_with_google_id_token(google_id_token)
 
@@ -208,8 +255,9 @@ def login_google_device() -> Dict[str, Any]:
     email = fb.get("email")
 
     cache = _load_cache()
+    bucket = _project_bucket(cache, project)
     key = _pick_account_key(email, local_id)
-    cache["accounts"][key] = {
+    bucket["accounts"][key] = {
         "provider": "google",
         "firebaseUid": local_id,
         "email": email,
@@ -217,39 +265,74 @@ def login_google_device() -> Dict[str, Any]:
         "refreshToken": refresh_token,
         "expiresAt": expires_at,
     }
-    cache["activeUserKey"] = key
+    bucket["activeUserKey"] = key
+
+    # Do not clobber legacy root unless it's empty; keep backward compatibility for readers
+    if not cache.get("accounts") and not cache.get("activeUserKey"):
+        cache["accounts"][key] = bucket["accounts"][key]
+        cache["activeUserKey"] = key
+
     _save_cache(cache)
-    return cache["accounts"][key]
+    return bucket["accounts"][key]
 
 
-def ensure_active_account() -> Dict[str, Any]:
+def _get_active_account_for_project(cache: Dict[str, Any], gcp_project: str) -> Optional[Dict[str, Any]]:
+    bucket = _project_bucket(cache, gcp_project)
+    key = bucket.get("activeUserKey")
+    if key and key in bucket.get("accounts", {}):
+        return bucket["accounts"][key]
+    # Fallback to legacy root; if found, migrate into project bucket
+    legacy_key = cache.get("activeUserKey")
+    if legacy_key and legacy_key in cache.get("accounts", {}):
+        acct = cache["accounts"][legacy_key]
+        bucket["accounts"][legacy_key] = acct
+        bucket["activeUserKey"] = legacy_key
+        _save_cache(cache)
+        return acct
+    return None
+
+
+def ensure_active_account(gcp_project: Optional[str] = None) -> Dict[str, Any]:
+    project = gcp_project or _resolve_gcp_project()
     cache = _load_cache()
-    key = cache.get("activeUserKey")
-    if key and key in cache.get("accounts", {}):
-        return cache["accounts"][key]
-    # No active account; run login
-    return login_google_device()
+    acct = _get_active_account_for_project(cache, project)
+    if acct:
+        return acct
+    # No active account for this project; run login and store in that bucket
+    return login_google_device(project)
 
 
-def _refresh_if_needed(acct: Dict[str, Any]) -> Dict[str, Any]:
+def _refresh_if_needed(acct: Dict[str, Any], gcp_project: Optional[str] = None) -> Dict[str, Any]:
     if _now() < int(acct.get("expiresAt", 0)):
         return acct
     id_token, refresh_token, expires_at = _firebase_refresh(acct.get("refreshToken"))
     acct.update({
         "idToken": id_token,
-        "refreshToken": refresh_token or acct.get("refreshToken"),
+        "RefreshToken": refresh_token or acct.get("refreshToken"),
         "expiresAt": expires_at,
     })
+    # Persist update within the appropriate project bucket if possible
+    project = gcp_project or _resolve_gcp_project()
     cache = _load_cache()
-    key = None
-    for k, v in cache.get("accounts", {}).items():
+    bucket = _project_bucket(cache, project)
+    # Try to locate the account by firebaseUid within the project bucket
+    target_key: Optional[str] = None
+    for k, v in bucket.get("accounts", {}).items():
         if v.get("firebaseUid") == acct.get("firebaseUid"):
-            key = k
+            target_key = k
             break
-    if key:
-        cache["accounts"][key] = acct
-        if cache.get("activeUserKey") is None:
-            cache["activeUserKey"] = key
+    # If not found in bucket, also check legacy root and migrate
+    if not target_key:
+        for k, v in cache.get("accounts", {}).items():
+            if v.get("firebaseUid") == acct.get("firebaseUid"):
+                target_key = k
+                bucket["accounts"][k] = acct
+                bucket["activeUserKey"] = k
+                break
+    if target_key:
+        bucket["accounts"][target_key] = acct
+        if bucket.get("activeUserKey") is None:
+            bucket["activeUserKey"] = target_key
         _save_cache(cache)
     return acct
 
@@ -260,8 +343,9 @@ def get_auth_headers() -> Dict[str, str]:
     - If SKIP_AUTH=1: return { 'X-Skip-Auth': '1' }
     - If FIREBASE_ID_TOKEN is set: use it
     - Else ensure a Firebase user session via Google Device Flow and refresh as needed
+    Scopes token storage by the per-repo dev config GCP project, defaulting to 'awfl-us'.
     """
-    headers = {}
+    headers: Dict[str, str] = {}
 
     if _project_id:
         headers["x-project-id"] = _project_id
@@ -275,8 +359,9 @@ def get_auth_headers() -> Dict[str, str]:
         headers["Authorization"] = f"Bearer {override}"
 
     else:
-      acct = ensure_active_account()
-      acct = _refresh_if_needed(acct)
-      headers["Authorization"] = f"Bearer {acct['idToken']}"
+        gcp_project = _resolve_gcp_project()
+        acct = ensure_active_account(gcp_project)
+        acct = _refresh_if_needed(acct, gcp_project)
+        headers["Authorization"] = f"Bearer {acct['idToken']}"
 
     return headers

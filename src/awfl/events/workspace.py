@@ -11,7 +11,7 @@ from awfl.auth import get_auth_headers, set_project_id
 from awfl.utils import get_api_origin, log_unique, _get_workflow_env_suffix
 
 # Local cache to avoid race/consistency issues when coordinating multiple consumers
-_PROJECT_CACHE_PATH = os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
+def _project_cache_path(): return os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
 
 def _normalize_remote(remote: str) -> str:
     if not remote:
@@ -56,7 +56,7 @@ def _get_git_remote(root: Optional[str]) -> Optional[str]:
         return None
 
 
-def _derive_project_name(remote_normalized: str) -> Optional[str]:
+def _derive_project_name(remote_normalized: str | None) -> Optional[str]:
     """Return a human name like 'org/repo' from a normalized remote.
     Examples:
       github.com/org/repo.git -> org/repo
@@ -83,7 +83,7 @@ def _derive_project_name(remote_normalized: str) -> Optional[str]:
 
 def _load_project_cache() -> Dict[str, Any]:
     try:
-        with open(_PROJECT_CACHE_PATH, "r", encoding="utf-8") as f:
+        with open(_project_cache_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except Exception:
@@ -92,11 +92,11 @@ def _load_project_cache() -> Dict[str, Any]:
 
 def _save_project_cache(obj: Dict[str, Any]) -> None:
     try:
-        os.makedirs(os.path.dirname(_PROJECT_CACHE_PATH), exist_ok=True)
-        tmp = _PROJECT_CACHE_PATH + ".tmp"
+        os.makedirs(os.path.dirname(_project_cache_path()), exist_ok=True)
+        tmp = _project_cache_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f)
-        os.replace(tmp, _PROJECT_CACHE_PATH)
+        os.replace(tmp, _project_cache_path())
     except Exception:
         pass
 
@@ -172,6 +172,18 @@ async def create_project(
         log_unique(f"⚠️ Error creating project: {e}")
         return None
 
+def repo_remote():
+    root = _detect_git_root()
+    if not root:
+        log_unique("ℹ️ Not in a git repo; cannot resolve project for workspace.")
+        return None
+    remote = _get_git_remote(root)
+    if not remote:
+        log_unique("ℹ️ No git remote 'origin' found; cannot resolve project for workspace.")
+        return None
+
+    return _normalize_remote(remote)
+
 
 async def resolve_project_id(
     session: aiohttp.ClientSession,
@@ -185,16 +197,10 @@ async def resolve_project_id(
     - If create_if_missing is True, creates a new project with name derived from org/repo.
     - Returns the project id or None if not found/created.
     """
-    root = _detect_git_root()
-    if not root:
-        log_unique("ℹ️ Not in a git repo; cannot resolve project for workspace.")
-        return None
-    remote = _get_git_remote(root)
-    if not remote:
-        log_unique("ℹ️ No git remote 'origin' found; cannot resolve project for workspace.")
-        return None
+    norm = repo_remote()
 
-    norm = _normalize_remote(remote)
+    if not norm:
+        return None
 
     # 1) Local cache first
     cache = _load_project_cache()
