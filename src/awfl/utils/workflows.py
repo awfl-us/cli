@@ -9,16 +9,6 @@ from .logging import log_unique, _is_debug
 from .urls import get_api_origin
 
 
-def _extract_user_auth_token_from_headers(headers: dict):
-    try:
-        auth = headers.get("Authorization") or headers.get("authorization") or ""
-        if isinstance(auth, str) and auth.lower().startswith("bearer "):
-            return auth.split(" ", 1)[1].strip()
-    except Exception:
-        pass
-    return None
-
-
 def _get_workflow_env_suffix() -> str:
     """Return the environment suffix to apply to workflow names.
     Precedence: state (per-process) > env var WORKFLOW_ENV > default "" (prod).

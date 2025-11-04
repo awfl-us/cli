@@ -11,6 +11,7 @@ import subprocess
 import difflib
 from pathlib import Path
 import uuid
+import shlex
 
 import awfl.utils as wf_utils
 from awfl.auth import ensure_active_account
@@ -20,7 +21,7 @@ from pathspec import PathSpec
 from awfl.commands import handle_command
 # from consume_cli_operations import consume_cli_operations
 from awfl.consumer import consume_events_sse
-from awfl.state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
+from awfl.state import set_workflow_env_suffix, get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
 
 STATUS_URL = "http://localhost:5050/api/cli/status"
 
@@ -188,7 +189,7 @@ def _compute_session_workflow_name() -> str:
 def _dev_cleanup():
     """Attempt to shut down dev resources (watcher, docker compose, ngrok)."""
     try:
-        from cmds.dev.subcommands.stop import stop_dev
+        from awfl.cmds.dev.subcommands.stop import stop_dev
         stop_dev([])
     except Exception:
         # Best-effort cleanup
@@ -202,7 +203,7 @@ def _rprompt():
 
 
 async def _refresh_prompt_task(session: PromptSession):
-    # Periodically invalidate the UI so rprompt updates even when idle
+    # Periodically invalidate the UI so rprompt reflects current status during idle
     while True:
         await asyncio.sleep(0.5)
         try:
@@ -211,13 +212,22 @@ async def _refresh_prompt_task(session: PromptSession):
             pass
 
 
+def _argv_positionals() -> list[str]:
+    return [a for a in sys.argv[1:] if a and not a.startswith("-")]
+
+
+def _argv_all() -> list[str]:
+    return sys.argv[1:]
+
+
 def _init_env_mode_from_argv():
     # Detect "awfl dev" (or python cli/main.py dev). Default is prod (no suffix)
-    args = [a for a in sys.argv[1:] if a and not a.startswith("-")]
+    args = _argv_positionals()
     is_dev = len(args) > 0 and args[0].lower() == "dev"
     if is_dev:
         # Child processes and utils will read WORKFLOW_ENV
         os.environ["WORKFLOW_ENV"] = "Dev"
+        set_workflow_env_suffix("Dev")
         wf_utils.log_unique("🏁 Starting awfl in Dev mode (WORKFLOW_ENV suffix 'Dev').")
         try:
             wf_utils.set_terminal_title("awfl [Dev]")
@@ -239,7 +249,39 @@ def _init_env_mode_from_argv():
         wf_utils.log_unique(f"🌐 API origin: {origin} (overridden by API_ORIGIN)")
     else:
         wf_utils.log_unique(f"🌐 API origin: {origin}")
-    wf_utils.log_unique(f"🧭 Execution mode: {exec_mode}")
+    # wf_utils.log_unique(f"🧭 Execution mode: {exec_mode}")
+
+
+def _startup_command_from_argv() -> str | None:
+    """Return a startup command line to execute, if provided.
+    Rules:
+    - No args -> None (enter interactive)
+    - ['dev'] -> None (enter interactive in Dev mode)
+    - Anything else -> join all args and run via handle_command
+    """
+    all_args = _argv_all()
+    if not all_args:
+        return None
+    if len(all_args) == 1 and all_args[0].lower() == "dev":
+        return None
+    # Reconstruct a shell-style command string so router can split consistently
+    try:
+        return shlex.join(all_args)
+    except Exception:
+        return " ".join(all_args)
+
+
+def _is_long_running_startup(cmd: str) -> bool:
+    try:
+        parts = shlex.split(cmd)
+    except Exception:
+        parts = cmd.split()
+    if not parts:
+        return False
+    # Identify commands that start long-lived dev processes/watchers
+    if parts[0] == "dev" and len(parts) > 1 and parts[1] in ("start", "watch"):
+        return True
+    return False
 
 
 async def main():
@@ -272,11 +314,21 @@ async def main():
     else:
         log_unique("ℹ️ No git repository detected; file watcher for ' ai:' diffs is disabled.")
 
-    ensure_active_account()
+    ensure_active_account(prompt_login=True)
 
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     asyncio.create_task(consume_events_sse(scope="project"))
     asyncio.create_task(consume_events_sse(scope="session"))
+
+    # If a long-running startup command was provided, execute it now inside the running event loop
+    bootstrap_cmd = os.environ.pop("AWFL_BOOTSTRAP_CMD", None)
+    if bootstrap_cmd:
+        try:
+            handle_command(bootstrap_cmd)
+            # Keep session aligned after potential workflow changes
+            set_session(_compute_session_workflow_name())
+        except Exception as e:
+            log_unique(f"⚠️ Error executing startup command '{bootstrap_cmd}': {e}")
 
     session = PromptSession()
     # Kick off periodic UI refresh so rprompt reflects current status during idle
@@ -320,4 +372,27 @@ async def main():
 
 if __name__ == "__main__":
     _init_env_mode_from_argv()
+    # If a startup command was provided (e.g., "awfl dev start" or "awfl help"),
+    # run it non-interactively and either keep the CLI open (for long-running dev commands)
+    # or exit after execution (for short-lived commands).
+    _startup_cmd = _startup_command_from_argv()
+    if _startup_cmd:
+        if _is_long_running_startup(_startup_cmd):
+            # Defer execution into the async runtime and keep CLI open
+            os.environ["AWFL_BOOTSTRAP_CMD"] = _startup_cmd
+            asyncio.run(main())
+            sys.exit(0)
+        else:
+            try:
+                handled = handle_command(_startup_cmd)
+                # Flush any buffered log lines to stdout
+                for line in log_lines:
+                    try:
+                        print(line)
+                    except Exception:
+                        pass
+            finally:
+                # Exit for short-lived commands
+                sys.exit(0)
+
     asyncio.run(main())

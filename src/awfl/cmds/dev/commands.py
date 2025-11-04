@@ -21,6 +21,7 @@ HELP_TEXT = (
     "  dev start [--no-ngrok] [--no-compose] [--no-watch] [--port N] "
     "[--auto-deploy=on|off] [--compose-file PATH] [--workflows-dir PATH] "
     "[--location REGION] [--project ID] [--reconfigure|-r] [-y|--yes] [--no-prompt]\n"
+    "  dev watch  (alias for: dev start --no-ngrok --no-compose)\n"
     "  dev stop [--no-ngrok] [--no-compose]\n"
     "  dev logs [--follow]\n"
     "  dev generate-yamls\n"
@@ -38,6 +39,9 @@ def handle_dev_command(args: List[str]) -> bool:
 
     if sub == "start":
         return start_dev(rest)
+    if sub == "watch":
+        # Enforce no ngrok and no compose by appending flags so they take precedence
+        return start_dev(rest + ["--no-ngrok", "--no-compose"])
     if sub == "stop":
         return stop_dev(rest)
     if sub == "logs":

@@ -35,7 +35,7 @@ def _git_root(cwd: Optional[str] = None) -> str:
 def discover_paths(root: Optional[str] = None) -> DevPaths:
     root_dir = root or _git_root()
     env_workflows = os.getenv("AWFL_WORKFLOWS_DIR")
-    workflows_dir = env_workflows or str(Path(root_dir) / "workflows")
+    workflows_dir = env_workflows or str(Path(root_dir))
 
     compose_env = os.getenv("AWFL_COMPOSE_FILE")
     # Prefer env override if it exists, otherwise search common locations.

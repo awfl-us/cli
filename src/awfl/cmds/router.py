@@ -31,7 +31,7 @@ def _default_help() -> bool:
         "  login | auth login\n"
         "  whoami | auth status\n"
         "  logout | auth logout\n"
-        "  use api | exec api    (or: use gcloud | exec gcloud)\n"
+        # "  use api | exec api    (or: use gcloud | exec gcloud)\n"
         "  set api_origin <url>\n"
         "  auth skip on|off\n"
         "  auth set-token <idToken> | auth clear-token\n"

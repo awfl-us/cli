@@ -10,14 +10,14 @@ import requests
 CACHE_DIR = pathlib.Path.home() / ".awfl"
 CACHE_PATH = CACHE_DIR / "tokens.json"
 
-FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyCuwFP2SA6GPGfdKLl4S4Tt7kvWSdZySw8"
-GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "85050401291-9lv9mf68b12md4q41rhra1fhgmfikdta.apps.googleusercontent.com"
-GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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" # optional, may be unused for public clients
+# FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyCuwFP2SA6GPGfdKLl4S4Tt7kvWSdZySw8"
+# GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "85050401291-9lv9mf68b12md4q41rhra1fhgmfikdta.apps.googleusercontent.com"
+# GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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" # optional, may be unused for public clients
 
 # New awfl-us
-# FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
-# GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
-# GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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"
+FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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"
 
 DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -99,18 +99,6 @@ def _project_bucket(cache: Dict[str, Any], gcp_project: str) -> Dict[str, Any]:
 def _pick_account_key(email: Optional[str], local_id: str) -> str:
     # Prefer email for readability; fall back to Firebase localId
     return f"google:{email}" if email else f"google:{local_id}"
-
-
-def _parse_jwt_no_verify(jwt_token: str) -> Dict[str, Any]:
-    try:
-        parts = jwt_token.split(".")
-        if len(parts) != 3:
-            return {}
-        payload_b64 = parts[1] + "=="  # pad
-        payload_json = base64.urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8")
-        return json.loads(payload_json)
-    except Exception:
-        return {}
 
 
 def _firebase_refresh(refresh_token: str) -> Tuple[str, str, int]:
@@ -268,9 +256,9 @@ def login_google_device(gcp_project: Optional[str] = None) -> Dict[str, Any]:
     bucket["activeUserKey"] = key
 
     # Do not clobber legacy root unless it's empty; keep backward compatibility for readers
-    if not cache.get("accounts") and not cache.get("activeUserKey"):
-        cache["accounts"][key] = bucket["accounts"][key]
-        cache["activeUserKey"] = key
+    # if not cache.get("accounts") and not cache.get("activeUserKey"):
+    #     cache["accounts"][key] = bucket["accounts"][key]
+    #     cache["activeUserKey"] = key
 
     _save_cache(cache)
     return bucket["accounts"][key]
@@ -282,24 +270,27 @@ def _get_active_account_for_project(cache: Dict[str, Any], gcp_project: str) -> 
     if key and key in bucket.get("accounts", {}):
         return bucket["accounts"][key]
     # Fallback to legacy root; if found, migrate into project bucket
-    legacy_key = cache.get("activeUserKey")
-    if legacy_key and legacy_key in cache.get("accounts", {}):
-        acct = cache["accounts"][legacy_key]
-        bucket["accounts"][legacy_key] = acct
-        bucket["activeUserKey"] = legacy_key
-        _save_cache(cache)
-        return acct
+    # legacy_key = cache.get("activeUserKey")
+    # if legacy_key and legacy_key in cache.get("accounts", {}):
+    #     acct = cache["accounts"][legacy_key]
+    #     bucket["accounts"][legacy_key] = acct
+    #     bucket["activeUserKey"] = legacy_key
+    #     _save_cache(cache)
+    #     return acct
     return None
 
 
-def ensure_active_account(gcp_project: Optional[str] = None) -> Dict[str, Any]:
+def ensure_active_account(gcp_project: Optional[str] = None, prompt_login: bool = False) -> Dict[str, Any]:
     project = gcp_project or _resolve_gcp_project()
     cache = _load_cache()
     acct = _get_active_account_for_project(cache, project)
     if acct:
         return acct
     # No active account for this project; run login and store in that bucket
-    return login_google_device(project)
+    if prompt_login:
+      return login_google_device(project)
+    else:
+        raise Exception("🚫 Must authenticate in main process")
 
 
 def _refresh_if_needed(acct: Dict[str, Any], gcp_project: Optional[str] = None) -> Dict[str, Any]:
@@ -335,6 +326,32 @@ def _refresh_if_needed(acct: Dict[str, Any], gcp_project: Optional[str] = None) 
             bucket["activeUserKey"] = target_key
         _save_cache(cache)
     return acct
+
+
+def logout_google_device(gcp_project: Optional[str] = None) -> bool:
+    """
+    Log out from Firebase/Google for the given GCP project.
+    Removes the stored account and activeUserKey for that project only.
+    Returns True if a token was removed, False if none existed.
+    """
+    project = gcp_project or _resolve_gcp_project()
+    cache = _load_cache()
+    bp = cache.get("byProject", {})
+
+    if project not in bp:
+        print(f"⚠️ No cached tokens found for project '{project}'.")
+        return False
+
+    # Remove the project's auth bucket
+    removed = bp.pop(project, None)
+    _save_cache(cache)
+
+    if removed and removed.get("accounts"):
+        print(f"🧹 Logged out of {project}: removed {len(removed['accounts'])} cached account(s).")
+        return True
+
+    print(f"⚠️ No active accounts to remove for project '{project}'.")
+    return False
 
 
 def get_auth_headers() -> Dict[str, str]:

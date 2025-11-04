@@ -4,7 +4,7 @@ import json
 from typing import Dict
 
 from awfl.utils import log_unique
-from awfl.auth import get_auth_headers, login_google_device
+from awfl.auth import get_auth_headers, login_google_device, logout_google_device
 
 
 def _decode_jwt_no_verify(token: str) -> Dict:
@@ -65,13 +65,4 @@ def print_whoami() -> None:
 
 
 def handle_logout() -> bool:
-    from .common import TOKEN_CACHE_PATH
-    try:
-        if TOKEN_CACHE_PATH.exists():
-            TOKEN_CACHE_PATH.unlink()
-            log_unique("🚪 Logged out: removed token cache (~/.awfl/tokens.json).")
-        else:
-            log_unique("ℹ️ No token cache found; already logged out.")
-    except Exception as e:
-        log_unique(f"⚠️ Failed to remove token cache: {e}")
-    return True
+    return logout_google_device()
