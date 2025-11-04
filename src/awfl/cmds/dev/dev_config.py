@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from awfl.utils import log_unique
 from awfl.auth import get_project_id
@@ -42,7 +42,32 @@ def save_dev_config(cfg: Dict[str, Any]) -> None:
         log_unique(f"⚠️ Failed to save dev config: {e}")
 
 
+def resolve_location_project() -> Tuple[str, str]:
+    """Resolve GCP location and project.
+
+    Precedence:
+    1) dev config (if available): location, project
+    2) environment: AWFL_GCLOUD_LOCATION, PROJECT | GOOGLE_CLOUD_PROJECT | GCLOUD_PROJECT
+    3) defaults: us-central1, topaigents
+    """
+    try:
+        cfg = load_dev_config() or {}
+    except Exception:
+        cfg = {}
+
+    location = cfg.get("location") or os.getenv("AWFL_GCLOUD_LOCATION") or "us-central1"
+    project = (
+        cfg.get("project")
+        or os.getenv("PROJECT")
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GCLOUD_PROJECT")
+        or "topaigents"
+    )
+    return str(location), str(project)
+
+
 __all__ = [
     "load_dev_config",
     "save_dev_config",
+    "resolve_location_project",
 ]

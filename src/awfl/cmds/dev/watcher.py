@@ -8,6 +8,7 @@ from typing import Optional, Set, List
 from awfl.utils import log_unique
 from .paths import DevPaths
 from .yaml_ops import generate_for_classes, deploy_workflow, _class_path_from_scala_file
+from .dev_config import resolve_location_project
 
 
 async def _watch_loop(paths: DevPaths, auto_deploy: bool, debounce_ms: int, stop_event: asyncio.Event):
@@ -68,8 +69,7 @@ async def _watch_loop(paths: DevPaths, auto_deploy: bool, debounce_ms: int, stop
 
                 changed = generate_for_classes(paths, classes)
                 if auto_deploy and changed:
-                    loc = os.getenv("AWFL_GCLOUD_LOCATION", "us-central1")
-                    proj = os.getenv("PROJECT", "topaigents")
+                    loc, proj = resolve_location_project()
                     for y in changed:
                         deploy_workflow(y, loc, proj)
     finally:

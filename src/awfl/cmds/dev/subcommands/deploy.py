@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import List
 
 from awfl.utils import log_unique
 
 from ..core import deploy_workflow
+from ..dev_config import resolve_location_project
 
 
 def deploy_workflow_cmd(args: List[str]) -> bool:
@@ -19,8 +19,7 @@ def deploy_workflow_cmd(args: List[str]) -> bool:
         return True
     if "yaml_gens" not in yaml_path:
         log_unique("⚠️ Expected a path under workflows/yaml_gens.")
-    location = os.getenv("AWFL_GCLOUD_LOCATION", "us-central1")
-    project = os.getenv("PROJECT", "topaigents")
+    location, project = resolve_location_project()
     deploy_workflow(yaml_path, location, project)
     return True
 

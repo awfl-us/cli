@@ -26,6 +26,7 @@ from ..core import (
     save_dev_config,
 )
 from ..prompt_utils import _prompt_yes_no, _prompt_value, _ensure_env
+from ..paths import _detect_scala_watch_dir
 
 # Late import inside functions to avoid circulars when stop imports core
 from .stop import stop_dev  # type: ignore
@@ -137,7 +138,8 @@ def start_dev(args: List[str]) -> bool:
     if workflows_dir_override:
         paths.workflows_dir = workflows_dir_override
         paths.yaml_gens_dir = str(Path(paths.workflows_dir) / "yaml_gens")
-        paths.scala_src_dir = str(Path(paths.workflows_dir) / "src" / "main" / "scala" / "workflows")
+        # Recompute scala watch dir using smarter detection
+        paths.scala_src_dir = str(_detect_scala_watch_dir(Path(paths.workflows_dir)))
     if compose_file_override:
         paths.compose_file = compose_file_override
 
@@ -161,7 +163,8 @@ def start_dev(args: List[str]) -> bool:
         workflows_dir_override = _prompt_value("Workflows dir (enter to keep)", paths.workflows_dir) or paths.workflows_dir
         paths.workflows_dir = workflows_dir_override
         paths.yaml_gens_dir = str(Path(paths.workflows_dir) / "yaml_gens")
-        paths.scala_src_dir = str(Path(paths.workflows_dir) / "src" / "main" / "scala" / "workflows")
+        # Recompute scala watch dir using smarter detection
+        paths.scala_src_dir = str(_detect_scala_watch_dir(Path(paths.workflows_dir)))
         location = _prompt_value("GCloud location", location or "us-central1") or location
         project = _prompt_value("GCloud project", project or "") or project
         auto_deploy = yes_all or _prompt_yes_no("Auto-deploy changed YAMLs?", default=auto_deploy)

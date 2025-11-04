@@ -32,10 +32,42 @@ def _git_root(cwd: Optional[str] = None) -> str:
     return cwd or os.getcwd()
 
 
+def _detect_scala_watch_dir(workflows_dir: Path) -> Path:
+    """Detect the best Scala source directory to watch.
+
+    Strategy:
+    - Base: <workflows_dir>/src/main/scala
+    - If <base>/workflows exists, prefer it.
+    - Else search under <base> for any directory named 'workflows' and pick the shallowest.
+    - If none found, fall back to <base> itself.
+    """
+    base = workflows_dir / "src" / "main" / "scala"
+    try:
+        if (base / "workflows").exists():
+            return base / "workflows"
+        # Find all candidate 'workflows' directories under base
+        cand = None
+        min_depth = 10**9
+        if base.exists():
+            for d in base.rglob("workflows"):
+                try:
+                    if d.is_dir():
+                        depth = len(d.relative_to(base).parts)
+                        if depth < min_depth:
+                            min_depth = depth
+                            cand = d
+                except Exception:
+                    # Skip paths that cannot be relativized
+                    continue
+        return cand or base
+    except Exception:
+        return base
+
+
 def discover_paths(root: Optional[str] = None) -> DevPaths:
     root_dir = root or _git_root()
     env_workflows = os.getenv("AWFL_WORKFLOWS_DIR")
-    workflows_dir = env_workflows or str(Path(root_dir))
+    workflows_dir = env_workflows or str(Path(root_dir) / "workflows")
 
     compose_env = os.getenv("AWFL_COMPOSE_FILE")
     # Prefer env override if it exists, otherwise search common locations.
@@ -56,14 +88,14 @@ def discover_paths(root: Optional[str] = None) -> DevPaths:
                 break
 
     yaml_gens_dir = str(Path(workflows_dir) / "yaml_gens")
-    scala_src_dir = str(Path(workflows_dir) / "src" / "main" / "scala" / "workflows")
+    scala_watch_dir = _detect_scala_watch_dir(Path(workflows_dir))
 
     return DevPaths(
         repo_root=root_dir,
         workflows_dir=workflows_dir,
         compose_file=compose_file,
         yaml_gens_dir=yaml_gens_dir,
-        scala_src_dir=scala_src_dir,
+        scala_src_dir=str(scala_watch_dir),
     )
 
 
