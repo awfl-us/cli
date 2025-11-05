@@ -10,11 +10,6 @@ import requests
 CACHE_DIR = pathlib.Path.home() / ".awfl"
 CACHE_PATH = CACHE_DIR / "tokens.json"
 
-# FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyCuwFP2SA6GPGfdKLl4S4Tt7kvWSdZySw8"
-# GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "85050401291-9lv9mf68b12md4q41rhra1fhgmfikdta.apps.googleusercontent.com"
-# GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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" # optional, may be unused for public clients
-
-# New awfl-us
 FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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"
