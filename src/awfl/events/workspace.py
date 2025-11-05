@@ -11,7 +11,16 @@ from awfl.auth import get_auth_headers, set_project_id
 from awfl.utils import get_api_origin, log_unique, _get_workflow_env_suffix
 
 # Local cache to avoid race/consistency issues when coordinating multiple consumers
-def _project_cache_path(): return os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
+# New cache keyed by derived project name (org/repo) so HTTPS/SSH remotes map to the same entry
+
+def _project_cache_path() -> str:
+    return os.path.expanduser(f"~/.awfl/projects_by_name{_get_workflow_env_suffix()}.json")
+
+
+def _project_cache_path_old() -> str:
+    # Legacy cache keyed by normalized remote
+    return os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
+
 
 def _normalize_remote(remote: str) -> str:
     if not remote:
@@ -59,21 +68,39 @@ def _get_git_remote(root: Optional[str]) -> Optional[str]:
 def _derive_project_name(remote_normalized: str | None) -> Optional[str]:
     """Return a human name like 'org/repo' from a normalized remote.
     Examples:
-      github.com/org/repo.git -> org/repo
-      github.com:org/repo.git -> org/repo
+      github.com/org/repo.git      -> org/repo
+      github.com:org/repo.git      -> org/repo (scp-style SSH)
+      github.com:8443/org/repo.git -> org/repo (host:port/path)
+      [2001:db8::1]:2222/org/repo.git -> org/repo
     """
     if not remote_normalized:
         return None
     r = remote_normalized
-    # Split after host delimiter ('/' or ':')
-    if '/' in r:
-        after = r.split('/', 1)[1]
-    elif ':' in r:
-        after = r.split(':', 1)[1]
+
+    # Determine where the host segment ends. Prefer '/' unless the string is scp-style
+    # (host:path) where a colon appears before the first '/'. If the colon is followed by
+    # digits up to the next '/', treat it as a port (use '/'). Otherwise, treat it as scp delimiter.
+    pos_slash = r.find('/')
+    pos_colon = r.find(':')
+
+    use_colon = False
+    if pos_colon != -1 and (pos_slash == -1 or pos_colon < pos_slash):
+        # Examine the segment after ':' up to the next '/'
+        end = len(r) if pos_slash == -1 else pos_slash
+        seg = r[pos_colon + 1:end]
+        if not seg.isdigit():
+            use_colon = True
+
+    if use_colon and pos_colon != -1:
+        after = r[pos_colon + 1:]
+    elif pos_slash != -1:
+        after = r[pos_slash + 1:]
     else:
         after = r
+
     # Strip trailing .git (human-friendly name only)
     after = after[:-4] if after.endswith('.git') else after
+
     # Expect org/repo
     parts = after.split('/')
     if len(parts) >= 2:
@@ -82,10 +109,32 @@ def _derive_project_name(remote_normalized: str | None) -> Optional[str]:
 
 
 def _load_project_cache() -> Dict[str, Any]:
+    # Prefer new cache keyed by derived name
     try:
         with open(_project_cache_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+
+    # Attempt migration from old cache keyed by normalized remote
+    try:
+        with open(_project_cache_path_old(), "r", encoding="utf-8") as f:
+            old = json.load(f)
+            if not isinstance(old, dict):
+                return {}
+            new_cache: Dict[str, Any] = {}
+            for k, v in old.items():
+                if not v:
+                    continue
+                name = _derive_project_name(str(k)) or str(k)
+                if isinstance(v, str) and name:
+                    new_cache[name] = v
+            if new_cache:
+                _save_project_cache(new_cache)
+                log_unique("🔁 Migrated project cache from projects_by_remote to projects_by_name")
+            return new_cache
     except Exception:
         return {}
 
@@ -172,6 +221,7 @@ async def create_project(
         log_unique(f"⚠️ Error creating project: {e}")
         return None
 
+
 def repo_remote():
     root = _detect_git_root()
     if not root:
@@ -192,7 +242,7 @@ async def resolve_project_id(
 ) -> Optional[str]:
     """Resolve the project id for the current git repo.
 
-    - Checks a local cache (by normalized remote) to avoid races/consistency gaps.
+    - Checks a local cache (by derived name org/repo) to avoid races/consistency gaps.
     - Lists existing projects and matches by normalized remote.
     - If create_if_missing is True, creates a new project with name derived from org/repo.
     - Returns the project id or None if not found/created.
@@ -202,9 +252,11 @@ async def resolve_project_id(
     if not norm:
         return None
 
-    # 1) Local cache first
+    name_key = _derive_project_name(norm) or norm
+
+    # 1) Local cache first (keyed by derived name)
     cache = _load_project_cache()
-    cached_id = cache.get(norm)
+    cached_id = cache.get(name_key)
     if isinstance(cached_id, str) and cached_id:
         set_project_id(cached_id)
         return cached_id
@@ -216,7 +268,7 @@ async def resolve_project_id(
         if _normalize_remote(str(r)) == norm:
             pid = p.get("id") or p.get("projectId")
             if pid:
-                cache[norm] = pid
+                cache[name_key] = pid
                 _save_project_cache(cache)
             set_project_id(pid)
             return pid
@@ -225,12 +277,12 @@ async def resolve_project_id(
         return None
 
     # 3) Not found -> create it using org/repo as the display name only
-    name = _derive_project_name(norm)
-    created = await create_project(session, remote=norm, name=name, live=False)
+    display_name = _derive_project_name(norm)
+    created = await create_project(session, remote=norm, name=display_name, live=False)
     if created and isinstance(created, dict):
         pid = created.get("id") or created.get("projectId")
         if pid:
-            cache[norm] = pid
+            cache[name_key] = pid
             _save_project_cache(cache)
         set_project_id(pid)
         return pid
