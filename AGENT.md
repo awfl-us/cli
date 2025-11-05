@@ -28,14 +28,14 @@ Session identity
   3) Local UUID set by main.py
 - response_handler.set_session(new_uuid) called at startup.
 
-Pub/Sub consumers
+Pub/Sub consumers FIX: We no longer consumer pubsub, now we consumer the SSE from the service (consumer/)
 - consumers/
   - Subscribes to the given subscription and decodes message.data as JSON.
   - Filters by attributes.sessionId equal to get_session(); messages with payload.background == true bypass filtering (always processed). Legacy messages whose attributes.sessionId starts with "background-" are also treated as background for backward compatibility.
   - On process success: ACK. On failure or (non-background) session mismatch: NACK for redelivery.
   - Forwards the JSON to response_handler.handle_response.
 
-Response handling (response_handler/)
+Response handling (response_handler/) FIX: response_handler.py was broken into multiple files to be cleaner
 - handle_response(data: dict)
   - Requires data.create_time; returns quietly if missing.
   - Optional data.content is logged unless the message is background (payload.background == true). For legacy compatibility, callback_session values starting with "background-" are also treated as background.
@@ -128,7 +128,7 @@ Dependencies
 - External tools:
   - gcloud CLI installed and authenticated for gcloud execution mode and waiter/cancel commands; also required for dev deploy-workflow.
 
-Local virtual environment (.venv)
+Local virtual environment (.venv) FIX: Now packaged with pyproject.toml
 - Scope
   - The CLI assumes a project-local virtual environment at cli/.venv for dependency isolation and reproducible runs while developing features.
 - Conventions
@@ -144,28 +144,6 @@ Local virtual environment (.venv)
   - Consider exporting PIP_REQUIRE_VIRTUALENV=1 to avoid accidental global installs.
   - When adding subprocess calls to Python, use sys.executable to ensure the current cli/.venv interpreter is used.
   - gcloud is external and unaffected by the Python venv; no change needed there.
-
-Notable environment variables
-- Execution/workflow:
-  - WORKFLOW_EXEC_MODE=api|gcloud (default api)
-  - API_ORIGIN (default http://localhost:5050)
-  - BASE_URL (otherwise auto/ngrok/prod)
-  - LLM_MODEL (default gpt-5)
-  - ASSISTANT_WORKFLOW (pins session identity)
-  - AWFL_NEST_ENV=1 (nest env params under params.env; set 0 to disable)
-- Auth and headers:
-  - SKIP_AUTH=1
-  - FIREBASE_ID_TOKEN (override)
-  - FIREBASE_API_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
-- Callback posting:
-  - CALLBACK_TIMEOUT_SECONDS, CALLBACK_CONNECT_TIMEOUT_SECONDS
-  - CALLBACK_USE_GCLOUD_TOKEN=1, CALLBACK_GCLOUD_ACCOUNT, GCLOUD_BIN
-  - READ_FILE_MAX_BYTES
-- Dev helpers:
-  - WORKFLOW_ENV (suffix, default Dev)
-  - AWFL_WORKFLOWS_DIR, AWFL_COMPOSE_FILE, AWFL_NGROK_PORT
-  - AWFL_GCLOUD_LOCATION (default us-central1), PROJECT (default topaigents)
-  - AUTO_DEPLOY (default on)
 
 Operational notes and cautions
 - Pub/Sub consumers require ADC or appropriate credentials; otherwise they will fail to subscribe.

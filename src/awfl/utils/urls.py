@@ -68,15 +68,15 @@ def get_api_origin() -> str:
     # Dev mode: use local dev defaults (ngrok -> localhost)
     if suffix:
         # Try to detect local ngrok tunnel (https)
-        try:
-            response = requests.get("http://localhost:4040/api/tunnels", timeout=2)
-            if response.status_code == 200:
-                tunnels = response.json().get("tunnels", [])
-                for tunnel in tunnels:
-                    if tunnel.get("proto") == "https":
-                        return tunnel["public_url"].rstrip('/')
-        except Exception:
-            pass
+        # try:
+        #     response = requests.get("http://localhost:4040/api/tunnels", timeout=2)
+        #     if response.status_code == 200:
+        #         tunnels = response.json().get("tunnels", [])
+        #         for tunnel in tunnels:
+        #             if tunnel.get("proto") == "https":
+        #                 return tunnel["public_url"].rstrip('/')
+        # except Exception:
+        #     pass
         # Fallback to local dev server
         return "http://localhost:5050"
 
