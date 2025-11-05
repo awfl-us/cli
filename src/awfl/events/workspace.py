@@ -1,9 +1,7 @@
-import asyncio
 import json
 import os
-import re
 import subprocess
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 
 import aiohttp
 
@@ -11,15 +9,10 @@ from awfl.auth import get_auth_headers, set_project_id
 from awfl.utils import get_api_origin, log_unique, _get_workflow_env_suffix
 
 # Local cache to avoid race/consistency issues when coordinating multiple consumers
-# New cache keyed by derived project name (org/repo) so HTTPS/SSH remotes map to the same entry
+# Cache is keyed by derived project name (org/repo) so HTTPS/SSH remotes map to the same entry
 
 def _project_cache_path() -> str:
     return os.path.expanduser(f"~/.awfl/projects_by_name{_get_workflow_env_suffix()}.json")
-
-
-def _project_cache_path_old() -> str:
-    # Legacy cache keyed by normalized remote
-    return os.path.expanduser(f"~/.awfl/projects_by_remote{_get_workflow_env_suffix()}.json")
 
 
 def _normalize_remote(remote: str) -> str:
@@ -109,32 +102,10 @@ def _derive_project_name(remote_normalized: str | None) -> Optional[str]:
 
 
 def _load_project_cache() -> Dict[str, Any]:
-    # Prefer new cache keyed by derived name
     try:
         with open(_project_cache_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
-
-    # Attempt migration from old cache keyed by normalized remote
-    try:
-        with open(_project_cache_path_old(), "r", encoding="utf-8") as f:
-            old = json.load(f)
-            if not isinstance(old, dict):
-                return {}
-            new_cache: Dict[str, Any] = {}
-            for k, v in old.items():
-                if not v:
-                    continue
-                name = _derive_project_name(str(k)) or str(k)
-                if isinstance(v, str) and name:
-                    new_cache[name] = v
-            if new_cache:
-                _save_project_cache(new_cache)
-                log_unique("🔁 Migrated project cache from projects_by_remote to projects_by_name")
-            return new_cache
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -377,7 +348,7 @@ async def get_or_create_workspace(
 
     Behavior aligned with RELAY.md:
     - If resolving a session-scoped workspace returns a project-wide workspace (no sessionId), register a new
-      session-scoped workspace and return its id.
+    session-scoped workspace and return its id.
     - Otherwise, return the resolved workspace id; if none exists, register and return the new id.
     """
     ws = await resolve_workspace(session, project_id, session_id=session_id)
