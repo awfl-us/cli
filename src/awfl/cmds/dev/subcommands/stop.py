@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from awfl.utils import log_unique
 
 from ..core import discover_paths, compose_down, stop_ngrok, compose_status
-from ..core import get_state, set_state
+from ..core import get_state, set_state, load_dev_config
 
 
 def stop_dev(args: List[str]) -> bool:
@@ -38,7 +38,8 @@ def stop_dev(args: List[str]) -> bool:
         log_unique("🛑 Watcher stopped.")
 
     # Bring down docker compose (replicate dev.sh behavior: always down if compose file exists)
-    paths = discover_paths()
+    cfg: Dict[str, Any] = load_dev_config() or {}
+    paths = discover_paths(cfg)
     if paths.compose_file and not no_compose and Path(paths.compose_file).exists():
         compose_down(paths.compose_file)
         set_state(compose_started_here=False)

@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from awfl.utils import log_unique
+from .dev.core import load_dev_config
 
 # Lightweight path discovery is always available
 from .dev.paths import discover_paths
@@ -41,7 +42,8 @@ def deploy_workflows() -> bool:
     - Logs a clear summary of actions taken.
     """
     # Discover repo and workflow paths once
-    paths = discover_paths()
+    cfg: Dict[str, Any] = load_dev_config() or {}
+    paths = discover_paths(cfg)
 
     # Preferred path: generate and deploy directly
     if generate_yamls and deploy_workflow:

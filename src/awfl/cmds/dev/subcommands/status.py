@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import List, Dict, Any
 
 from awfl.utils import log_unique
 
 from ..core import discover_paths, compose_status, get_state, _short_display, _env_suffix
-from ..core import _get_ngrok_existing_url
+from ..core import _get_ngrok_existing_url, load_dev_config
 
 
 def status_cmd(args: List[str]) -> bool:
-    paths = discover_paths()
+    cfg: Dict[str, Any] = load_dev_config() or {}
+    paths = discover_paths(cfg)
 
     tunnel = _get_ngrok_existing_url()
     comp = compose_status(paths.compose_file)

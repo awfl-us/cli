@@ -92,8 +92,6 @@ def start_dev(args: List[str]) -> bool:
     use_watch = bool(cfg.get("use_watch", use_watch))
     location = cfg.get("location", location)
     project = cfg.get("project", project)
-    compose_file_override = cfg.get("compose_file", compose_file_override)
-    workflows_dir_override = cfg.get("workflows_dir", workflows_dir_override)
 
     # Flags
     reconfigure = False
@@ -134,7 +132,7 @@ def start_dev(args: List[str]) -> bool:
             log_unique(f"ℹ️ Ignoring unknown flag: {tok}")
 
     # Discover paths and apply overrides (from either flags or persisted cfg)
-    paths = discover_paths()
+    paths = discover_paths(cfg)
     if workflows_dir_override:
         paths.workflows_dir = workflows_dir_override
         paths.yaml_gens_dir = str(Path(paths.workflows_dir) / "yaml_gens")

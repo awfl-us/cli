@@ -1,7 +1,7 @@
 import os
 from awfl.utils import log_unique
 from .auth_cmds import print_whoami
-from .workflows import resolve_workflows_dir
+# from .workflows import resolve_workflows_dir
 
 
 def set_exec_mode(mode: str) -> bool:
@@ -51,7 +51,7 @@ def print_status() -> None:
     origin = os.getenv('API_ORIGIN') or 'http://localhost:5050'
     skip = os.getenv('SKIP_AUTH') == '1'
     has_override = bool(os.getenv('FIREBASE_ID_TOKEN'))
-    wf_dir = resolve_workflows_dir()
-    log_unique(f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'} | workflows_dir={wf_dir}")
+    # wf_dir = resolve_workflows_dir()
+    log_unique(f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'}")
     if mode == 'api':
         print_whoami()

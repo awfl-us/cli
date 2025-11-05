@@ -10,10 +10,10 @@ from awfl.auth import get_auth_headers
 from .common import get_orig_cwd
 
 
-def resolve_workflows_dir() -> str:
-    """Strictly resolve to "$AWFL_ORIG_CWD/workflows/yaml_gens" (no walk-up)."""
-    orig = get_orig_cwd()
-    return str(Path(orig) / "workflows" / "yaml_gens")
+# def resolve_workflows_dir() -> str:
+#     """Strictly resolve to "$AWFL_ORIG_CWD/workflows/yaml_gens" (no walk-up)."""
+#     orig = get_orig_cwd()
+#     return str(Path(orig) / "workflows" / "yaml_gens")
 
 
 def collect_workflow_names(workflows_dir: str) -> List[str]:
@@ -69,7 +69,7 @@ def navigate_tree(tree: Dict[str, dict]) -> None:
         children_keys = sorted(current["_children"].keys())
         path_display = "/".join([label for (label, _node) in stack]) or "Workflows"
         print(f"\n=== {path_display} ===")
-        active = get_active_workflow() or "cli-QuerySubmitted"
+        active = get_active_workflow() or "codebase-ProjectManager"
         print(f"Active workflow: {active}")
 
         # If this node is a pure leaf (no children), select it immediately
@@ -218,23 +218,23 @@ def ls_workflows_interactive() -> None:
     # Try remote API first
     names = _fetch_remote_workflow_names(location=None)
 
-    if not names:
-        # Graceful fallback to local directory listing
-        workflows_dir = resolve_workflows_dir()
-        names = collect_workflow_names(workflows_dir)
-        if not names:
-            log_unique(f"No workflows found under {workflows_dir}.")
-            return
-        p = Path(workflows_dir)
-        if p.name == "yaml_gens" and p.parent.name == "workflows":
-            display_dir = "workflows/yaml_gens"
-        else:
-            orig = get_orig_cwd()
-            try:
-                display_dir = os.path.relpath(workflows_dir, start=orig)
-            except Exception:
-                display_dir = workflows_dir
-        log_unique(f"📁 Listing workflows from local disk: {display_dir}")
+    # if not names:
+    #     # Graceful fallback to local directory listing
+    #     workflows_dir = resolve_workflows_dir()
+    #     names = collect_workflow_names(workflows_dir)
+    #     if not names:
+    #         log_unique(f"No workflows found under {workflows_dir}.")
+    #         return
+    #     p = Path(workflows_dir)
+    #     if p.name == "yaml_gens" and p.parent.name == "workflows":
+    #         display_dir = "workflows/yaml_gens"
+    #     else:
+    #         orig = get_orig_cwd()
+    #         try:
+    #             display_dir = os.path.relpath(workflows_dir, start=orig)
+    #         except Exception:
+    #             display_dir = workflows_dir
+    #     log_unique(f"📁 Listing workflows from local disk: {display_dir}")
 
     tree = build_tree(names)
     navigate_tree(tree)

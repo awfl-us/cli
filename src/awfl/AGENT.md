@@ -15,7 +15,7 @@ Entry point: main.py
     - consumers/
 - Interactive prompt loop:
   - Shows recent log lines.
-  - Accepts commands; if not a command, sends the text to the currently selected workflow (default cli-QuerySubmittedDev).
+  - Accepts commands; if not a command, sends the text to the currently selected workflow (default codebase-ProjectManagerDev).
 - Constants:
   - STATUS_URL: http://localhost:5050/api/cli/status (not used in current code)
   - PUBSUB_SUBSCRIPTION: projects/topaigents/subscriptions/duel-mode-sub (declared but unused)
@@ -75,8 +75,8 @@ Workflow execution utilities (utils.py)
 - Global/project constants: PROJECT=topaigents, LOCATION=us-central1.
 
 State management (state.py)
-- DEFAULT_WORKFLOW = cli-QuerySubmitted
-- normalize_workflow: strips leading "workflows.", replaces dots with dashes (e.g., workflows.cli.QuerySubmitted -> cli-QuerySubmitted).
+- DEFAULT_WORKFLOW = codebase-ProjectManager
+- normalize_workflow: strips leading "workflows.", replaces dots with dashes (e.g., workflows.cli.QuerySubmitted -> codebase-ProjectManager).
 - Tracks active workflow and active execution (resource name + workflow name). Helpers to set/get/clear.
 - Dev runtime helpers: dev commands keep ephemeral state within the dev_cmds module; state.py remains minimal.
 

@@ -4,7 +4,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 @dataclass
@@ -64,10 +64,13 @@ def _detect_scala_watch_dir(workflows_dir: Path) -> Path:
         return base
 
 
-def discover_paths(root: Optional[str] = None) -> DevPaths:
+def discover_paths(cfg: Dict[str, Any], root: Optional[str] = None) -> DevPaths:
+    compose_file_cfg = cfg.get("compose_file")
+    workflows_dir_cfg = cfg.get("workflows_dir")
+
     root_dir = root or _git_root()
     env_workflows = os.getenv("AWFL_WORKFLOWS_DIR")
-    workflows_dir = env_workflows or str(Path(root_dir) / "workflows")
+    workflows_dir = env_workflows or workflows_dir_cfg or str(Path(root_dir))
 
     compose_env = os.getenv("AWFL_COMPOSE_FILE")
     # Prefer env override if it exists, otherwise search common locations.
@@ -78,12 +81,12 @@ def discover_paths(root: Optional[str] = None) -> DevPaths:
         Path(workflows_dir) / "docker-compose.yml",
         Path(workflows_dir) / "docker-compose.yaml",
     ]
-    compose_file: Optional[str] = None
+    compose_file: Optional[str] = compose_file_cfg
     if compose_env:
         compose_file = compose_env if Path(compose_env).exists() else None
     if compose_file is None:
         for c in compose_candidates:
-            if c.exists():
+            if c and c.exists():
                 compose_file = str(c)
                 break
 

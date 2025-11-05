@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 # Default workflow used when none is selected
-DEFAULT_WORKFLOW = "cli-QuerySubmitted"
+DEFAULT_WORKFLOW = "codebase-ProjectManager"
 
 # Active workflow (normalized)
 _active_workflow: Optional[str] = None
