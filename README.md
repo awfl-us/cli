@@ -1,14 +1,14 @@
 # AWFL CLI
 
+[![License](https://img.shields.io/github/license/awfl-us/cli)](LICENSE)
+![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB)
+![Status](https://img.shields.io/badge/Status-Beta-blueviolet)
+
+[![AWFL CLI demo](https://asciinema.org/a/6j9ogW7VuF7vzQaikMkUQ5HsV.svg)](https://asciinema.org/a/6j9ogW7VuF7vzQaikMkUQ5HsV?speed=1.5&autoplay=1)
+
 A developer-friendly command line for working with AI-powered workflows and codebase-aware agents.
 
 AWFL CLI lets you converse with agent workflows from your terminal, apply code changes safely via tool calls, and watch live progress and events. It is designed for day‑to‑day development in AWFL repositories and any project where agents need to read, write, and run within your workspace.
-
-
-Badges
-- License: MIT
-- Python: 3.11, 3.12, 3.13
-- Status: Beta
 
 
 Table of contents
