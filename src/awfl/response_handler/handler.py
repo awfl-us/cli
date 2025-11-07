@@ -7,25 +7,27 @@ from datetime import datetime
 
 from awfl.utils import log_unique
 
-from .callbacks import post_callback
+from .callbacks import post_internal_callback
 from .rh_utils import read_file_text_utf8_ignore, sanitize_shell_command
 from .session_state import get_session
 
 
 async def handle_response(data: dict):
-    # Prefer direct callback URL when provided
-    callback_url = data.get("callback_url")
+    # Internal callback by id is now required; direct callback URLs are no longer supported
+    callback_id = data.get("callback_id")
 
     updated_at = data.get("create_time")
 
     # Current session
     session_id = get_session()
 
-    # Unified sender: POST to callback_url if present; otherwise, skip quietly
+    # Unified sender: POST via internal service; if callback_id missing, log and return
     async def send_result(payload: dict):
-        if callback_url:
-            cid = uuid.uuid4().hex[:8]
-            await post_callback(callback_url, payload, correlation_id=cid)
+        if not callback_id:
+            log_unique("No callback_id provided; skipping callback delivery")
+            return
+        cid = uuid.uuid4().hex[:8]
+        await post_internal_callback(callback_id, payload, correlation_id=cid)
 
     # 1) Preferred path: tool_calls (tool-enabled chat)
     tc = data.get("tool_call")
@@ -150,6 +152,5 @@ async def handle_response(data: dict):
         # Done handling tool_calls; return
         return
 
-    # 2) Back-compat path: direct action field (intentionally omitted)
     # No action provided: intentionally quiet
     return

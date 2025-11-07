@@ -37,25 +37,21 @@ Pub/Sub consumers FIX: We no longer consumer pubsub, now we consumer the SSE fro
 
 Response handling (response_handler/) FIX: response_handler.py was broken into multiple files to be cleaner
 - handle_response(data: dict)
-  - Requires data.create_time; returns quietly if missing.
-  - Optional data.content is logged unless the message is background (payload.background == true). For legacy compatibility, callback_session values starting with "background-" are also treated as background.
-  - If data.callback_url is present, results are POSTed there via post_callback().
+  - Uses data.create_time when provided for timestamps.
+  - Results are POSTed exclusively via the internal callback service using callback_id. If callback_id is missing, no callback is sent and a log line is emitted.
   - Tool calls: data.tool_call.function.name determines action (case-insensitive handling via .upper()):
     - UPDATE_FILE: write content to path (create parents). Sends callback payload with filepath.
     - READ_FILE: read text and send up to READ_FILE_MAX_BYTES (default 200000) with truncated flag.
     - RUN_COMMAND: runs shell command, captures stdout/stderr; truncates stdout to 50,000 chars.
     - Unknown tools: log "Unknown tool".
   - Back-compat direct action path is present but commented out.
-- post_callback(callback_url, payload)
-  - Adds Authorization: Bearer token for hosts ending with googleapis.com (Workflows callbacks) using _get_bearer_token().
-  - Timeouts controlled by env:
+- post_internal_callback(callback_id, payload)
+  - Builds URL from get_api_origin() and posts to {origin}/api/workflows/callbacks/{callback_id}; on 404, retries once at {origin}/workflows/callbacks/{callback_id}.
+  - Uses get_auth_headers() to include user Authorization (Firebase ID token) or X-Skip-Auth and x-project-id.
+  - Respects timeouts controlled by env:
     - CALLBACK_TIMEOUT_SECONDS (default 25)
     - CALLBACK_CONNECT_TIMEOUT_SECONDS (default 5)
-  - Optional debug of headers via CALLBACK_LOG_HEADERS=1 (Authorization masked in logs).
-  - Special 404 retry: if Google callback URL contains an underscore in callback id, retries once with the first underscore replaced by a hyphen.
-- OAuth token acquisition
-  - If CALLBACK_USE_GCLOUD_TOKEN=1, attempts gcloud auth print-access-token first; honors GCLOUD_BIN (default "gcloud") and CALLBACK_GCLOUD_ACCOUNT.
-  - Otherwise uses ADC via google.auth.default with cloud-platform scope; refreshes via google.auth.transport.requests.
+  - Optional header debug via CALLBACK_LOG_HEADERS=1 (Authorization masked in logs).
 
 Workflow execution utilities (utils.py)
 - log_unique(text)

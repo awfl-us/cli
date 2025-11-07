@@ -3,5 +3,4 @@
 
 from .session_state import set_session, get_session, get_latest_status, set_prompt_status  # noqa: F401
 from .handler import handle_response  # noqa: F401
-from .callbacks import post_callback  # noqa: F401
 from .event_logger import process_event  # noqa: F401

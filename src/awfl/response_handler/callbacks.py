@@ -2,78 +2,37 @@ import os
 import uuid
 import time
 import asyncio
-from urllib.parse import urlparse
 
 import aiohttp
-import requests
-import google.auth
-from google.auth.transport.requests import Request as SyncRequest
 
-from awfl.utils import log_unique
+from awfl.utils import log_unique, get_api_origin
+from awfl.auth import get_auth_headers
 from .rh_utils import mask_headers
 
 
-async def _get_gcloud_token() -> str:
-    """Return a user access token via gcloud, honoring optional account.
-    Respects:
-      - GCLOUD_BIN (default: "gcloud")
-      - CALLBACK_GCLOUD_ACCOUNT (optional)
+async def post_internal_callback(callback_id: str, payload: dict, *, correlation_id: str | None = None):
+    """POST callback payload to our internal server using user auth.
+
+    - Uses get_api_origin() to build the base origin (no trailing /api).
+    - Primary path: {origin}/api/workflows/callbacks/{callback_id}.
+    - Fallback path (on 404): {origin}/workflows/callbacks/{callback_id}.
+    - Adds Firebase user Authorization header (or X-Skip-Auth) and x-project-id via get_auth_headers().
+    - Respects CALLBACK_TIMEOUT_SECONDS / CALLBACK_CONNECT_TIMEOUT_SECONDS for timeouts.
     """
-    import subprocess
-
-    def _sync() -> str:
-        gcloud_bin = os.environ.get("GCLOUD_BIN", "gcloud")
-        account = os.environ.get("CALLBACK_GCLOUD_ACCOUNT")
-        cmd = [gcloud_bin, "auth", "print-access-token"]
-        if account:
-            cmd += ["--account", account]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if res.returncode != 0:
-            raise RuntimeError(
-                f"gcloud token failed rc={res.returncode} stderr={res.stderr.strip()}"
-            )
-        token = (res.stdout or "").strip()
-        if not token:
-            raise RuntimeError("gcloud token empty")
-        return token
-
-    return await asyncio.to_thread(_sync)
-
-
-async def _get_adc_token() -> str:
-    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-
-    if not creds.valid:
-        def _refresh():
-            sess = requests.Session()
-            creds.refresh(SyncRequest(session=sess))
-        await asyncio.to_thread(_refresh)
-
-    if not getattr(creds, "token", None):
-        raise RuntimeError("no token after ADC refresh")
-
-    return creds.token
-
-
-async def _get_bearer_token() -> str:
-    """Acquire a bearer token using either gcloud (if requested) or ADC."""
-    use_gcloud = os.environ.get("CALLBACK_USE_GCLOUD_TOKEN") == "1"
-
-    if use_gcloud:
-        try:
-            return await _get_gcloud_token()
-        except Exception:
-            pass  # fall back to ADC silently
-
-    return await _get_adc_token()
-
-
-async def post_callback(callback_url: str, payload: dict, *, correlation_id: str | None = None):
     cid = correlation_id or os.environ.get("CALLBACK_CORRELATION_ID") or uuid.uuid4().hex[:8]
+    origin = (get_api_origin() or "").rstrip('/')
+    primary_url = f"{origin}/api/workflows/callbacks/{callback_id}"
+    fallback_url = f"{origin}/workflows/callbacks/{callback_id}"
+
     try:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        parsed = urlparse(callback_url)
-        host = parsed.netloc
+        # Merge auth headers (Authorization or X-Skip-Auth + x-project-id)
+        try:
+            auth_headers = get_auth_headers() or {}
+            headers.update(auth_headers)
+        except Exception as e:
+            # If we cannot resolve user auth, surface an error in logs but still attempt without it
+            log_unique(f"post_internal_callback: failed to resolve auth headers: {e}")
 
         timeout_total = int(os.environ.get("CALLBACK_TIMEOUT_SECONDS", "25"))
         connect_timeout = int(os.environ.get("CALLBACK_CONNECT_TIMEOUT_SECONDS", "5"))
@@ -83,43 +42,30 @@ async def post_callback(callback_url: str, payload: dict, *, correlation_id: str
             sock_read=max(1, timeout_total - connect_timeout),
         )
 
-        # Attach OAuth token for Google APIs (e.g., Workflows callbacks)
-        if host.endswith("googleapis.com"):
-            token = await _get_bearer_token()
-            headers["Authorization"] = f"Bearer {token}"
-
         debug_headers = os.environ.get("CALLBACK_LOG_HEADERS") == "1"
-        if debug_headers:
-            log_unique(f"[callback:req] POST {callback_url} headers={mask_headers(headers)} cid={cid}")
-
-        async def _do_post(session: aiohttp.ClientSession, url: str):
-            t0 = time.time()
-            async with session.post(url, json=payload, headers=headers) as resp:
-                body_text = await resp.text()  # drain body
-                dt = int((time.time() - t0) * 1000)
-                if debug_headers:
-                    # Log subset of response headers; avoid dumping large maps
-                    resp_h = {k: v for k, v in resp.headers.items() if k.lower() in {"date", "server", "content-type", "content-length"}}
-                    log_unique(f"[callback:resp] {resp.status} in {dt}ms for {url} resp_headers={resp_h} body_len={len(body_text)} cid={cid}")
-                return resp.status
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            status = await _do_post(session, callback_url)
+            async def _post(url: str) -> int:
+                if debug_headers:
+                    log_unique(f"[callback:int:req] POST {url} headers={mask_headers(headers)} cid={cid}")
+                t0 = time.time()
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    body_text = await resp.text()
+                    dt = int((time.time() - t0) * 1000)
+                    if debug_headers:
+                        resp_h = {k: v for k, v in resp.headers.items() if k.lower() in {"date", "server", "content-type", "content-length"}}
+                        log_unique(f"[callback:int:resp] {resp.status} in {dt}ms for {url} resp_headers={resp_h} body_len={len(body_text)} cid={cid}")
+                    if resp.status >= 400:
+                        log_unique(f"Internal callback returned HTTP {resp.status} for {url} [cid={cid}] body_len={len(body_text)}")
+                    return resp.status
 
-            # Defensive retry: if we get a 404 and the callback id uses an underscore, try a hyphen.
-            if (
-                status == 404
-                and host.endswith("googleapis.com")
-                and "/callbacks/" in parsed.path
-            ):
-                tail = callback_url.rsplit("/", 1)[-1]
-                if "_" in tail:
-                    alt_tail = tail.replace("_", "-", 1)
-                    alt_url = callback_url[: -len(tail)] + alt_tail
-                    log_unique("404 on callback URL; retrying once with hyphenated ID")
-                    await _do_post(session, alt_url)
+            status = await _post(primary_url)
+            if status == 404 and primary_url != fallback_url:
+                # Retry once without '/api' prefix for dev servers running on a different port/path
+                log_unique("Internal callback 404 on primary path; retrying without /api prefix")
+                await _post(fallback_url)
 
     except asyncio.TimeoutError:
-        log_unique(f"Callback POST timed out [cid={cid}] for {callback_url}")
+        log_unique(f"Internal callback POST timed out [cid={cid}] for {primary_url}")
     except Exception as e:
-        log_unique(f"Failed to POST callback [cid={cid}] to {callback_url}: {e}")
+        log_unique(f"Failed to POST internal callback [cid={cid}] to {primary_url}: {e}")
