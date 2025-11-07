@@ -124,21 +124,32 @@ def _is_long_running_startup(cmd: str) -> bool:
     return False
 
 
-def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.Event):
+def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.Event, *, fatal: bool):
     def _cb(t: asyncio.Task):
         try:
             exc = t.exception()
-            if exc:
-                wf_utils.log_unique(f"❌ {name} SSE consumer ended with error: {exc}")
-            else:
-                wf_utils.log_unique(f"❌ {name} SSE consumer ended.")
         except asyncio.CancelledError:
             # If cancelled during shutdown, don't trigger the event
             return
         except Exception as e:
-            wf_utils.log_unique(f"❌ {name} SSE consumer ended (unknown state): {e}")
-        # Signal that at least one consumer ended unexpectedly
-        evt.set()
+            # If we cannot access exception(), treat as unknown
+            exc = e
+
+        if exc:
+            # Any unhandled exception in a consumer is fatal for its classification
+            if fatal:
+                wf_utils.log_unique(f"❌ {name} SSE consumer ended with error: {exc}")
+                evt.set()
+            else:
+                wf_utils.log_unique(f"⚠️ {name} SSE consumer ended with error (non-fatal): {exc}")
+            return
+
+        # Normal completion (e.g., project consumer skipped due to leader lock)
+        if fatal:
+            wf_utils.log_unique(f"❌ {name} SSE consumer ended.")
+            evt.set()
+        else:
+            wf_utils.log_unique(f"ℹ️ {name} SSE consumer ended (non-fatal).")
 
     task.add_done_callback(_cb)
 
@@ -164,8 +175,8 @@ async def main():
     consumer_shutdown_evt = asyncio.Event()
     project_consumer = asyncio.create_task(consume_events_sse(scope="project"), name="sse-project")
     session_consumer = asyncio.create_task(consume_events_sse(scope="session"), name="sse-session")
-    _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt)
-    _attach_crash_on_consumer_exit(session_consumer, "session", consumer_shutdown_evt)
+    _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt, fatal=False)
+    _attach_crash_on_consumer_exit(session_consumer, "session", consumer_shutdown_evt, fatal=True)
 
     # If a long-running startup command was provided, execute it now inside the running event loop
     bootstrap_cmd = os.environ.pop("AWFL_BOOTSTRAP_CMD", None)
@@ -179,10 +190,10 @@ async def main():
 
     session = PromptSession()
     # Kick off periodic UI refresh so rprompt reflects current status during idle
-    asyncio.create_task(_refresh_prompt_task(session))
+    refresh_task = asyncio.create_task(_refresh_prompt_task(session), name="refresh-rprompt")
 
-    # Background waiter that resolves when any consumer has ended
-    consumer_waiter = asyncio.create_task(consumer_shutdown_evt.wait())
+    # Background waiter that resolves when any fatal consumer has ended
+    consumer_waiter = asyncio.create_task(consumer_shutdown_evt.wait(), name="consumer-waiter")
 
     try:
         with patch_stdout():
@@ -198,19 +209,20 @@ async def main():
                 prompt_wf = normalize_workflow(active_wf)
 
                 prompt_task = asyncio.create_task(
-                    session.prompt_async(f"🧐 {prompt_wf} > ", rprompt=_rprompt)
+                    session.prompt_async(f"🧐 {prompt_wf} > ", rprompt=_rprompt),
+                    name="prompt"
                 )
 
                 done, pending = await asyncio.wait(
                     {prompt_task, consumer_waiter}, return_when=asyncio.FIRST_COMPLETED
                 )
 
-                # If a consumer ended, crash the CLI (bad UX to stay open without streams)
+                # If a fatal consumer ended, crash the CLI (bad UX to stay open without streams)
                 if consumer_waiter in done:
                     # Cancel the prompt if still waiting
                     if not prompt_task.done():
                         prompt_task.cancel()
-                        with contextlib.suppress(Exception):
+                        with contextlib.suppress(asyncio.CancelledError):
                             await prompt_task
                     log_unique("❌ Event stream consumer stopped. Exiting CLI so you can restart.")
                     # Best-effort cancel the other consumer (if still running)
@@ -249,11 +261,12 @@ async def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # Cleanup
-        for t in (project_consumer, session_consumer, consumer_waiter):
+        # Cleanup: cancel background tasks and suppress CancelledError to avoid noisy tracebacks
+        for t in (project_consumer, session_consumer, consumer_waiter, refresh_task):
             if t and not t.done():
                 t.cancel()
-                with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError):
+                if t:
                     await t
 
 

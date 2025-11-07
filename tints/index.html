@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tints & Audio Shop — Manager MVP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Tints & Audio — Manager</div>
+    <nav class="tabs" aria-label="Primary">
+      <button class="tab active" data-target="dashboard">Dashboard</button>
+      <button class="tab" data-target="customers">Customers</button>
+      <button class="tab" data-target="appointments">Appointments</button>
+      <button class="tab" data-target="sales">Sales</button>
+      <button class="tab" data-target="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <!-- Dashboard -->
+    <section id="dashboard" class="page active" aria-labelledby="tab-dashboard">
+      <h1>Dashboard</h1>
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpi-label">Total Customers</div>
+          <div id="kpi-customers" class="kpi-value">0</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Upcoming Appointments</div>
+          <div id="kpi-appointments" class="kpi-value">0</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">This Month's Revenue</div>
+          <div id="kpi-revenue" class="kpi-value">$0.00</div>
+        </div>
+      </div>
+      <p class="muted">KPIs update as you add data.</p>
+    </section>
+
+    <!-- Customers -->
+    <section id="customers" class="page" aria-labelledby="tab-customers">
+      <h1>Customers</h1>
+      <form id="customer-form" class="card">
+        <h2>Add / Edit Customer</h2>
+        <div class="grid">
+          <label>
+            Full Name
+            <input type="text" name="name" placeholder="e.g., Alex Johnson" required title="Customer name is required" />
+          </label>
+          <label>
+            Phone
+            <input type="tel" name="phone" placeholder="e.g., (555) 123-4567" pattern="[0-9\-\+\(\)\s]{7,}" title="Enter a valid phone number" />
+          </label>
+          <label>
+            Email
+            <input type="email" name="email" placeholder="e.g., alex@example.com" title="Enter a valid email" />
+          </label>
+          <label>
+            Vehicle
+            <input type="text" name="vehicle" placeholder="e.g., 2018 Honda Civic" />
+          </label>
+          <label class="col-2">
+            Notes
+            <textarea name="notes" rows="2" placeholder="Preferences, film type, audio brand, etc."></textarea>
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save Customer</button>
+          <button type="reset" class="btn">Clear</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Customer List</h2>
+          <input id="customer-search" class="search" type="search" placeholder="Search customers..." />
+        </div>
+        <div class="table-wrap">
+          <table id="customers-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Vehicle</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody><!-- Populated by app.js --></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Appointments -->
+    <section id="appointments" class="page" aria-labelledby="tab-appointments">
+      <h1>Appointments</h1>
+      <form id="appointment-form" class="card">
+        <h2>Book Appointment</h2>
+        <div class="grid">
+          <label>
+            Date
+            <input type="date" name="date" required title="Date is required" />
+          </label>
+          <label>
+            Time
+            <input type="time" name="time" required title="Time is required" />
+          </label>
+          <label>
+            Customer
+            <input type="text" name="customer" placeholder="Name or phone" required title="Customer is required" />
+          </label>
+          <label>
+            Vehicle
+            <input type="text" name="vehicle" placeholder="e.g., 2020 Toyota Camry" />
+          </label>
+          <label>
+            Service
+            <select name="service">
+              <option value="Window Tint">Window Tint</option>
+              <option value="Audio Install">Audio Install</option>
+              <option value="Detailing">Detailing</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            Price
+            <input type="number" name="price" min="0" step="0.01" placeholder="e.g., 199.99" title="Enter price (optional)" />
+          </label>
+          <label>
+            Status
+            <select name="status">
+              <option>Scheduled</option>
+              <option>Confirmed</option>
+              <option>Completed</option>
+              <option>Cancelled</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save Appointment</button>
+          <button type="reset" class="btn">Clear</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Appointment List</h2>
+          <input id="appointment-search" class="search" type="search" placeholder="Search appointments..." />
+        </div>
+        <div class="table-wrap">
+          <table id="appointments-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Customer</th>
+                <th>Vehicle</th>
+                <th>Service</th>
+                <th>Price</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody><!-- Populated by app.js --></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sales -->
+    <section id="sales" class="page" aria-labelledby="tab-sales">
+      <h1>Sales</h1>
+      <form id="sale-form" class="card">
+        <h2>Record Sale</h2>
+        <div class="grid">
+          <label>
+            Date
+            <input type="date" name="date" required title="Date is required" />
+          </label>
+          <label>
+            Customer
+            <input type="text" name="customer" placeholder="Name or phone" />
+          </label>
+          <label class="col-2">
+            Item / Service
+            <input type="text" name="item" placeholder="e.g., Ceramic Tint (Full)" required title="Item or service is required" />
+          </label>
+          <label>
+            Amount
+            <input type="number" name="amount" min="0" step="0.01" placeholder="e.g., 299.99" required title="Amount is required" />
+          </label>
+          <label>
+            Payment
+            <select name="payment">
+              <option>Cash</option>
+              <option>Card</option>
+              <option>Online</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <label class="col-2">
+            Notes
+            <input type="text" name="notes" placeholder="e.g., 5% rear, 35% front; Subwoofer package" />
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save Sale</button>
+          <button type="reset" class="btn">Clear</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Sales History</h2>
+          <input id="sales-search" class="search" type="search" placeholder="Search sales..." />
+        </div>
+        <div class="table-wrap">
+          <table id="sales-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Item / Service</th>
+                <th>Amount</th>
+                <th>Payment</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody><!-- Populated by app.js --></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings" class="page" aria-labelledby="tab-settings">
+      <h1>Settings</h1>
+      <form id="settings-form" class="card">
+        <h2>Shop Settings</h2>
+        <div class="grid">
+          <label>
+            Business Name
+            <input type="text" name="businessName" placeholder="e.g., Shine & Sound" />
+          </label>
+          <label>
+            Tax Rate (%)
+            <input type="number" name="taxRate" min="0" step="0.01" placeholder="e.g., 8.25" />
+          </label>
+          <label class="col-2">
+            Address
+            <input type="text" name="address" placeholder="Street, City, State" />
+          </label>
+          <label>
+            Phone
+            <input type="tel" name="shopPhone" placeholder="(555) 987-6543" pattern="[0-9\-\+\(\)\s]{7,}" title="Enter a valid phone number" />
+          </label>
+          <label>
+            Email
+            <input type="email" name="shopEmail" placeholder="contact@shine-sound.example" title="Enter a valid email" />
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save Settings</button>
+          <button type="reset" class="btn">Reset</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Data Management</h2>
+          <p class="muted">Export a backup, import data, or reset everything (local to this browser).</p>
+        </div>
+        <div class="actions">
+          <button id="export-data" class="btn">Export JSON</button>
+          <input id="import-file" type="file" accept="application/json" style="display:none" />
+          <button id="import-data" class="btn">Import JSON</button>
+          <button id="reset-data" class="btn danger">Reset All Data</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <small>© <span id="year"></span> Tints & Audio Shop — Internal Use</small>
+  </footer>
+
+  <!-- Toasts -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

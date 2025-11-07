@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB)
 ![Status](https://img.shields.io/badge/Status-Beta-blueviolet)
 
-[![AWFL CLI demo](https://asciinema.org/a/6j9ogW7VuF7vzQaikMkUQ5HsV.svg)](https://asciinema.org/a/6j9ogW7VuF7vzQaikMkUQ5HsV?speed=1.5&autoplay=1)
+<img src="docs/awfl-quickstart.svg" alt="AWFL CLI demo" width="900">
 
 A developer-friendly command line for working with AI-powered workflows and codebase-aware agents.
 
