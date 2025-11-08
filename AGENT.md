@@ -46,12 +46,13 @@ Response handling (response_handler/) FIX: response_handler.py was broken into m
     - Unknown tools: log "Unknown tool".
   - Back-compat direct action path is present but commented out.
 - post_internal_callback(callback_id, payload)
-  - Builds URL from get_api_origin() and posts to {origin}/api/workflows/callbacks/{callback_id}; on 404, retries once at {origin}/workflows/callbacks/{callback_id}.
+  - Builds URL from get_api_origin() and posts to {origin}/api/workflows/callbacks/{callback_id}; no fallback paths.
   - Uses get_auth_headers() to include user Authorization (Firebase ID token) or X-Skip-Auth and x-project-id.
   - Respects timeouts controlled by env:
     - CALLBACK_TIMEOUT_SECONDS (default 25)
     - CALLBACK_CONNECT_TIMEOUT_SECONDS (default 5)
-  - Optional header debug via CALLBACK_LOG_HEADERS=1 (Authorization masked in logs).
+    - CALLBACK_RETRY_DELAY_MS (default 500)
+  - Minimal retry policy: one attempt plus at most one fixed-delay retry on transient errors (HTTP 429 or 5xx) or network/timeout errors. No Retry-After handling and no logging.
 
 Workflow execution utilities (utils.py)
 - log_unique(text)
