@@ -27,6 +27,23 @@ def log_cost_if_changed(cost: Any) -> None:
         _last_cost_logged = cost_val
 
 
+def log_error_if_present(error: Any, *, is_background: bool) -> None:
+    """Log an error line when present in the payload.
+
+    We always log errors to make failures visible, even for background events.
+    """
+    if not error:
+        return
+    try:
+        if isinstance(error, (dict, list)):
+            err_text = json.dumps(error)
+        else:
+            err_text = str(error)
+    except Exception:
+        err_text = str(error)
+    log_unique(f"❌ Error: {err_text}")
+
+
 def log_user_message(user_msg: Optional[str], *, error: Optional[str], is_background: bool, ts_ms: int) -> None:
     """Handle non-error user-facing message logging and status hints embedded in content.
 
@@ -96,6 +113,10 @@ def process_event(data: Dict[str, Any]) -> None:
 
     # Status update first
     apply_status(data.get("status"), data.get("error"), is_background=is_background, ts_ms=ts_ms)
+
+    # Error line (if present)
+    if "error" in data and data.get("error"):
+        log_error_if_present(data.get("error"), is_background=is_background)
 
     # Cost line (non-error)
     if "cost" in data:

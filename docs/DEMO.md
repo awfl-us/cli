@@ -15,12 +15,14 @@ Prerequisites
   - macOS: brew install asciinema (may install v2)
   - Linux: pipx install 'asciinema==2.4.0' or use your package manager (ensure it’s v2)
 - Optional: GIF export (agg)
-  - Go (recommended):
-    - Install Go toolchain if needed (macOS): brew install go, or download from https://go.dev/dl/
-    - Install agg: go install github.com/asciinema/agg@latest
-    - Ensure $GOBIN or GOPATH/bin (default: $HOME/go/bin) is on PATH:
-      - export PATH="$HOME/go/bin:$PATH"
+  - Rust/Cargo (recommended):
+    - Install Rust toolchain with rustup (https://rustup.rs/) if needed
+    - Install agg: cargo install --git https://github.com/asciinema/agg
+    - Ensure $HOME/.cargo/bin is on PATH:
+      - export PATH="$HOME/.cargo/bin:$PATH"
       - Persist by adding the line above to ~/.zshrc or ~/.bashrc
+  - Homebrew (macOS):
+    - brew install asciinema-agg
   - Docker (no local install):
     - docker run --rm -v "$PWD":/data asciinema/asciicast2gif INPUT.cast OUTPUT.gif
       Replace INPUT.cast/OUTPUT.gif with your filenames.
@@ -43,7 +45,7 @@ Quick start
 2) Export a GIF (optional)
 - Requires agg:
   - ./scripts/record_demo.sh gif recordings/awfl-quickstart.cast docs/awfl-quickstart.gif
-  - If agg is missing, the script prints install guidance (Go, Docker, Releases).
+  - If agg is missing, the script prints install guidance (Cargo, Homebrew, Docker, Releases).
 
 3) Export an SVG (optional)
 - Requires either a global svg-term or npx (Node.js/npm) to fetch svg-term-cli on the fly. No local package.json is used or required:
@@ -76,10 +78,13 @@ Troubleshooting
     - pipx run --spec 'asciinema==2.4.0' asciinema rec recordings/awfl-quickstart.cast
     - or pipx install 'asciinema==2.4.0' && asciinema rec recordings/awfl-quickstart.cast
 - agg not installed:
-  - Install via Go: go install github.com/asciinema/agg@latest
+  - Install via Cargo (recommended):
+    - Install Rust via rustup (https://rustup.rs/) if needed
+    - cargo install --git https://github.com/asciinema/agg
+    - Ensure $HOME/.cargo/bin is on PATH (export PATH="$HOME/.cargo/bin:$PATH")
+  - Or via Homebrew (macOS): brew install asciinema-agg
   - Or avoid local install with Docker: docker run --rm -v "$PWD":/data asciinema/asciicast2gif INPUT.cast OUTPUT.gif
   - Or use a prebuilt binary from Releases and place it on your PATH
-  - Ensure $HOME/go/bin is on PATH if using Go (export PATH="$HOME/go/bin:$PATH")
 - Command not found: Ensure asciinema is installed. For SVG export, make sure either svg-term is installed globally or Node.js + npm are on PATH so the script can run npx --package=svg-term-cli.
 - GIF too large: Re-record shorter, or consider SVG/asciinema link instead of GIF.
 - Terminal size ignored: Resize your terminal window before recording; asciinema captures the actual size.

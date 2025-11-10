@@ -50,14 +50,13 @@ print_agg_install_help() {
 agg (asciicast→GIF) is not installed.
 
 Install options:
-- Go (recommended):
-    # Install Go toolchain if needed (macOS):
-    #   brew install go
-    # Or download from https://go.dev/dl/
-    # Install agg
-    go install github.com/asciinema/agg@latest
-    # Ensure $GOBIN or GOPATH/bin (default: $HOME/go/bin) is on PATH
-    export PATH="$HOME/go/bin:$PATH"
+- Cargo (recommended):
+    # Install Rust toolchain with rustup (https://rustup.rs/) if needed
+    cargo install --git https://github.com/asciinema/agg
+    # Ensure $HOME/.cargo/bin is on PATH
+    export PATH="$HOME/.cargo/bin:$PATH"
+- Homebrew (macOS):
+    brew install asciinema-agg
 - Docker (no local install):
     docker run --rm -v "$PWD":/data asciinema/asciicast2gif INPUT.cast OUTPUT.gif
   Replace INPUT.cast/OUTPUT.gif with your paths.
