@@ -15,8 +15,6 @@ from awfl.commands import handle_command
 from awfl.consumer import consume_events_sse
 from awfl.state import set_workflow_env_suffix, get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
 
-STATUS_URL = "http://localhost:5050/api/cli/status"
-
 
 def _compute_session_workflow_name() -> str:
     override = os.environ.get("ASSISTANT_WORKFLOW")

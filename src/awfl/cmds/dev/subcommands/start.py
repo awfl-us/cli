@@ -196,7 +196,7 @@ def start_dev(args: List[str]) -> bool:
                 break
             time.sleep(0.25)
         if tunnel_url:
-            os.environ["BASE_URL"] = tunnel_url
+            os.environ["WORKFLOWS_BASE_URL"] = f"{tunnel_url}/jobs"
             log_unique(f"Ngrok tunnel established at: {tunnel_url}")
         else:
             log_unique("⚠️ Failed to retrieve ngrok URL!")

@@ -10,7 +10,6 @@ from .logging import (
     set_terminal_title,
 )
 from .urls import (
-    get_base_url,
     get_api_origin,
 )
 from .workflows import (
@@ -32,7 +31,6 @@ __all__ = [
     "reset_abort_requested",
     "set_terminal_title",
     # urls
-    "get_base_url",
     "get_api_origin",
     # workflows
     "trigger_workflow",

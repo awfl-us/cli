@@ -10,8 +10,8 @@ from awfl.auth import get_auth_headers
 async def post_internal_callback(callback_id: str, payload: dict, *, correlation_id: str | None = None):
     """POST callback payload to our internal server using user auth.
 
-    - Uses get_api_origin() to build the base origin (no trailing /api).
-    - Path: {origin}/api/workflows/callbacks/{callback_id} (no fallback paths).
+    - Uses get_api_origin() to build the base origin (dev includes '/api', prod does not).
+    - Path: {origin}/workflows/callbacks/{callback_id} (no fallback paths).
     - Adds Firebase user Authorization header (or X-Skip-Auth) and x-project-id via get_auth_headers().
     - Respects CALLBACK_TIMEOUT_SECONDS / CALLBACK_CONNECT_TIMEOUT_SECONDS for per-attempt timeouts.
     - Minimal retry: one attempt plus at most one fixed-delay retry on transient errors (429, 5xx) or network/timeout errors.
@@ -20,7 +20,7 @@ async def post_internal_callback(callback_id: str, payload: dict, *, correlation
     _ = correlation_id  # kept for signature compatibility
 
     origin = (get_api_origin() or "").rstrip('/')
-    url = f"{origin}/api/workflows/callbacks/{callback_id}"
+    url = f"{origin}/workflows/callbacks/{callback_id}"
 
     try:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}

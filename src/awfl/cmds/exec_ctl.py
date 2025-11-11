@@ -25,7 +25,7 @@ def stop_or_cancel_active() -> bool:
     workflow_for_stop = _ensure_env_suffix(wf_name, suffix)
 
     origin = get_api_origin()
-    url = f"{origin}/api/workflows/exec/stop"
+    url = f"{origin}/workflows/exec/stop"
     try:
         headers = {"Content-Type": "application/json"}
         headers.update(get_auth_headers())

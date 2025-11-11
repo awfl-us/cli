@@ -16,9 +16,6 @@ Entry point: main.py
 - Interactive prompt loop:
   - Shows recent log lines.
   - Accepts commands; if not a command, sends the text to the currently selected workflow (default codebase-ProjectManagerDev).
-- Constants:
-  - STATUS_URL: http://localhost:5050/api/cli/status (not used in current code)
-  - PUBSUB_SUBSCRIPTION: projects/topaigents/subscriptions/duel-mode-sub (declared but unused)
 - Uses state.get_active_workflow + normalize_workflow; allows overriding session with ASSISTANT_WORKFLOW env.
 
 Session identity
@@ -57,15 +54,13 @@ Response handling (response_handler/) FIX: response_handler.py was broken into m
 Workflow execution utilities (utils.py)
 - log_unique(text)
   - Dedupes consecutive identical lines by SHA1; keeps last 20 lines; prints via prompt_toolkit fallback to print().
-- get_base_url()
-  - Returns BASE_URL env if set; else detects local ngrok at http://localhost:4040 for an https tunnel; else defaults to https://us-central1-topaigents.cloudfunctions.net.
 - get_api_origin()
-  - Prefers API_ORIGIN env; else falls back to get_base_url(); default http://localhost:5050 for local dev.
+  - Prefers API_ORIGIN env; default http://localhost:5050/api for local dev.
 - trigger_workflow(name, data)
   - Adds LLM_MODEL (default gpt-5) to data and BASE_URL.
   - Two execution modes via WORKFLOW_EXEC_MODE env:
     - gcloud (default): runs `gcloud workflows execute` with JSON --data; extracts execution name and spawns a waiter thread.
-    - api: POST {origin}/api/workflows/execute with Firebase Auth headers; logs response; if an execution name is returned, also spawns the waiter thread.
+    - api: POST {origin}/workflows/execute with Firebase Auth headers; logs response; if an execution name is returned, also spawns the waiter thread.
   - Waiter thread (_wait_for_execution_and_log) uses `gcloud workflows executions wait`; on success attempts to parse result JSON and log cost if present.
 - cancel_active_execution()
   - Issues `gcloud workflows executions cancel` in a non-blocking Popen; clears active execution immediately.

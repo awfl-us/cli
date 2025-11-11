@@ -161,7 +161,7 @@ def _fetch_remote_workflow_names(location: Optional[str]) -> Optional[List[str]]
         or LOCATION
         or "us-central1"
     )
-    url = f"{origin}/api/workflows/list?location={loc}"
+    url = f"{origin}/workflows/list?location={loc}"
 
     # Log intent (source and params)
     log_unique(f"📡 Fetching workflows from API: {origin} (location={loc})")

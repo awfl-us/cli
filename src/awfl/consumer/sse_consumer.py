@@ -51,7 +51,7 @@ async def consume_events_sse(
     # Resolve defaults
     if stream_url is None:
         origin = get_api_origin()
-        stream_url = f"{origin}/api/workflows/events/stream"
+        stream_url = f"{origin}/workflows/events/stream"
 
     scope = (scope or "session").lower()
 

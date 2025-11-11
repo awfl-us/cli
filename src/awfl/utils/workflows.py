@@ -44,7 +44,7 @@ def _mask_auth_header(headers: dict) -> dict:
 
 def trigger_workflow(name: str, data: Dict[str, Any]):
     """Trigger a workflow. Supports two modes:
-    - api (default): POST /api/workflows/execute with Firebase Auth
+    - api (default): POST /workflows/execute with Firebase Auth
     - gcloud: (not implemented here in refactor snapshot)
 
     Select via WORKFLOW_EXEC_MODE env var: 'api' (default) or 'gcloud'.
@@ -88,7 +88,7 @@ def trigger_workflow(name: str, data: Dict[str, Any]):
         # Server applies env suffix; ensure we DO NOT include it
         wf_name = _strip_env_suffix(name, suffix)
         origin = get_api_origin()
-        url = f"{origin}/api/workflows/execute"
+        url = f"{origin}/workflows/execute"
         payload = {
             "workflowName": wf_name,
             "params": data,

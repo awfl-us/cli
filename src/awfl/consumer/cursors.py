@@ -17,7 +17,7 @@ from awfl.utils import get_api_origin, log_unique
 
 def _cursors_url() -> str:
     origin = get_api_origin()
-    return f"{origin}/api/workflows/events/cursors"
+    return f"{origin}/workflows/events/cursors"
 
 
 async def get_resume_event_id(

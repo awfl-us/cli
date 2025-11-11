@@ -123,7 +123,7 @@ def _save_project_cache(obj: Dict[str, Any]) -> None:
 
 async def fetch_projects(session: aiohttp.ClientSession) -> list[dict]:
     origin = get_api_origin()
-    url = f"{origin}/api/workflows/projects"
+    url = f"{origin}/workflows/projects"
     headers = {}
     try:
         headers.update(get_auth_headers())
@@ -159,7 +159,7 @@ async def create_project(
     Returns the created project object or None on failure.
     """
     origin = get_api_origin()
-    url = f"{origin}/api/workflows/projects"
+    url = f"{origin}/workflows/projects"
     headers = {"Content-Type": "application/json"}
     try:
         headers.update(get_auth_headers())
@@ -269,7 +269,7 @@ async def resolve_workspace(
     ttl_ms: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     origin = get_api_origin()
-    url = f"{origin}/api/workflows/workspace/resolve"
+    url = f"{origin}/workflows/workspace/resolve"
     params: Dict[str, Any] = {"projectId": project_id}
     if session_id:
         params["sessionId"] = session_id
@@ -304,7 +304,7 @@ async def register_workspace(
     session_id: Optional[str] = None,
 ) -> Optional[str]:
     origin = get_api_origin()
-    url = f"{origin}/api/workflows/workspace/register"
+    url = f"{origin}/workflows/workspace/register"
 
     headers = {"Content-Type": "application/json"}
     try:
