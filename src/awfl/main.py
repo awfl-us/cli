@@ -250,7 +250,7 @@ async def main():
                 workflow = normalize_workflow(workflow)
                 session_id = _compute_session_workflow_name()
                 # Log base workflow name; utils.trigger_workflow will handle env suffixing per mode
-                log_unique(f"🚀 Query submitted to {workflow} (session: {session_id}): {text}")
+                log_unique(f"🚀 {session_id} > {text}")
                 # Pass base workflow name; env suffixing handled centrally in utils.trigger_workflow
                 trigger_workflow(workflow, {
                     "sessionId": session_id,

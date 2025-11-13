@@ -195,7 +195,10 @@ def derive_workflow_name(yaml_path: str) -> str:
 
 
 def _env_suffix() -> str:
-    return os.getenv("WORKFLOW_ENV", "Dev")
+    suffix = os.getenv("WORKFLOW_ENV", "Dev")
+    if suffix == "": # The CLI should only deploy to dev
+        suffix = "Dev"
+    return suffix
 
 
 def _prepare_deploy_source(yaml_path: str) -> str:

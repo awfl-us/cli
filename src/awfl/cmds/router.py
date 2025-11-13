@@ -12,7 +12,7 @@ from .exec_ctl import stop_or_cancel_active
 from .auth_cmds import handle_login, print_whoami, handle_logout
 from .config_cmds import set_exec_mode, set_api_origin, set_skip_auth, set_token_override, print_status
 from .model_cmds import get_or_set_model
-from .deploy_cmds import deploy_workflows
+from .deploy_cmds import deploy_workflows, deploy_awfl_workflows
 from .dev import handle_dev_command
 
 
@@ -40,6 +40,7 @@ def _default_help() -> bool:
         "  call <workflow> [args...]\n"
         "  stop | cancel | abort\n"
         "  deploy workflows\n"
+        "  deploy awfl workflows\n"
         "  dev <subcommand>  (dev help for details)\n"
     )
     return True
@@ -141,6 +142,8 @@ def handle_command(line: str) -> bool:
         return stop_or_cancel_active()
     if cmd == "deploy workflows":
         return deploy_workflows()
+    if cmd == "deploy awfl workflows":
+        return deploy_awfl_workflows()
     if cmd.startswith("dev ") or cmd == "dev":
         parts = shlex.split(line)
         return handle_dev_command(parts[1:])

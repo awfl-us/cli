@@ -10,9 +10,10 @@ import requests
 CACHE_DIR = pathlib.Path.home() / ".awfl"
 CACHE_PATH = CACHE_DIR / "tokens.json"
 
-FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY") or "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
-GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
-GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "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"
+# Defaults if neither env nor dev_config provide values
+_DEFAULT_FIREBASE_API_KEY = "AIzaSyBPVdMuYlC5dW-yBquEgrNYs5CUYrOJQJ4"
+_DEFAULT_GOOGLE_OAUTH_CLIENT_ID = "323709301334-u7pmm22o8bd95s1ovn6a1u1srfo5qa89.apps.googleusercontent.com"
+_DEFAULT_GOOGLE_OAUTH_CLIENT_SECRET = "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"
 
 DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -96,11 +97,46 @@ def _pick_account_key(email: Optional[str], local_id: str) -> str:
     return f"google:{email}" if email else f"google:{local_id}"
 
 
+# ----- Dynamic auth config resolution (env > dev_config > defaults) -----
+
+def _load_dev_config_safe() -> Dict[str, Any]:
+    try:
+        from awfl.cmds.dev.dev_config import load_dev_config
+        return load_dev_config() or {}
+    except Exception:
+        return {}
+
+
+def _get_firebase_api_key() -> str:
+    return (
+        os.getenv("FIREBASE_API_KEY")
+        or _load_dev_config_safe().get("firebase_api_key")
+        or _DEFAULT_FIREBASE_API_KEY
+    )
+
+
+def _get_google_oauth_client_id() -> str:
+    return (
+        os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        or _load_dev_config_safe().get("google_oauth_client_id")
+        or _DEFAULT_GOOGLE_OAUTH_CLIENT_ID
+    )
+
+
+def _get_google_oauth_client_secret() -> str:
+    return (
+        os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        or _load_dev_config_safe().get("google_oauth_client_secret")
+        or _DEFAULT_GOOGLE_OAUTH_CLIENT_SECRET
+    )
+
+
 def _firebase_refresh(refresh_token: str) -> Tuple[str, str, int]:
-    if not FIREBASE_API_KEY:
+    api_key = _get_firebase_api_key()
+    if not api_key:
         raise RuntimeError("FIREBASE_API_KEY not set; cannot refresh Firebase token.")
     r = requests.post(
-        f"{FIREBASE_REFRESH_URL}?key={FIREBASE_API_KEY}",
+        f"{FIREBASE_REFRESH_URL}?key={api_key}",
         data={
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
@@ -116,7 +152,9 @@ def _firebase_refresh(refresh_token: str) -> Tuple[str, str, int]:
 
 
 def _firebase_sign_in_with_google_id_token(google_id_token: str) -> Dict[str, Any]:
-    if not FIREBASE_API_KEY:
+    api_key = _get_firebase_api_key()
+    print(f"API Key: {api_key}")
+    if not api_key:
         raise RuntimeError("FIREBASE_API_KEY not set; cannot exchange Google ID token with Firebase.")
     payload = {
         "postBody": f"id_token={google_id_token}&providerId=google.com",
@@ -125,28 +163,31 @@ def _firebase_sign_in_with_google_id_token(google_id_token: str) -> Dict[str, An
         "returnIdpCredential": True,
     }
     r = requests.post(
-        f"{FIREBASE_IDP_URL}?key={FIREBASE_API_KEY}",
+        f"{FIREBASE_IDP_URL}?key={api_key}",
         json=payload,
         timeout=30,
     )
     if not r.ok:
-      print("🚨 Firebase sign-in failed:", r.status_code, r.text)
+        print("🚨 Firebase sign-in failed:", r.status_code, r.text)
     r.raise_for_status()
     return r.json()
 
 
 def _google_device_flow() -> str:
-    if not GOOGLE_OAUTH_CLIENT_ID:
+    client_id = _get_google_oauth_client_id()
+    client_secret = _get_google_oauth_client_secret()
+
+    if not client_id:
         raise RuntimeError("GOOGLE_OAUTH_CLIENT_ID not set; cannot start Google Device Flow.")
 
     if os.getenv("AWFL_DEBUG") == "1":
-        print(f"[auth] Using GOOGLE_OAUTH_CLIENT_ID={GOOGLE_OAUTH_CLIENT_ID}")
+        print(f"[auth] Using GOOGLE_OAUTH_CLIENT_ID={client_id}")
 
     # Step 1: request device/user codes
     r = requests.post(
         DEVICE_CODE_URL,
         data={
-            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+            "client_id": client_id,
             "scope": SCOPES,
         },
         timeout=20,
@@ -182,13 +223,13 @@ def _google_device_flow() -> str:
     start = _now()
     while _now() - start < expires_in:
         data = {
-            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+            "client_id": client_id,
             "device_code": device_code,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         }
         # Some Google OAuth clients require a client_secret; include if present
-        if GOOGLE_OAUTH_CLIENT_SECRET:
-            data["client_secret"] = GOOGLE_OAUTH_CLIENT_SECRET
+        if client_secret:
+            data["client_secret"] = client_secret
         t = requests.post(TOKEN_URL, data=data, timeout=20)
         if t.status_code == 200:
             tok = t.json()
@@ -283,7 +324,7 @@ def ensure_active_account(gcp_project: Optional[str] = None, prompt_login: bool 
         return acct
     # No active account for this project; run login and store in that bucket
     if prompt_login:
-      return login_google_device(project)
+        return login_google_device(project)
     else:
         raise Exception("🚫 Must authenticate in main process")
 
@@ -356,6 +397,7 @@ def get_auth_headers() -> Dict[str, str]:
     - If FIREBASE_ID_TOKEN is set: use it
     - Else ensure a Firebase user session via Google Device Flow and refresh as needed
     Scopes token storage by the per-repo dev config GCP project, defaulting to 'awfl-us'.
+    Note: Firebase and Google OAuth credentials are resolved dynamically (env > dev_config > defaults).
     """
     headers: Dict[str, str] = {}
 

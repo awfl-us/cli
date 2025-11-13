@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from awfl.utils import log_unique
+from awfl.auth import ensure_active_account
 
 from ..core import (
     DevPaths,
@@ -71,6 +72,11 @@ def _register_shutdown_hooks() -> None:
     set_state(dev_shutdown_hooks_registered=True)
 
 
+def _set_env_if_nonempty(key: str, value: Optional[str]) -> None:
+    if value is not None and str(value).strip() != "":
+        os.environ[key] = str(value)
+
+
 def start_dev(args: List[str]) -> bool:
     # Defaults (lowest precedence)
     port = int(os.getenv("AWFL_NGROK_PORT", "8081") or 8081)
@@ -92,6 +98,11 @@ def start_dev(args: List[str]) -> bool:
     use_watch = bool(cfg.get("use_watch", use_watch))
     location = cfg.get("location", location)
     project = cfg.get("project", project)
+
+    # Resolve auth-related defaults (env > dev_config > empty string)
+    fb_api_key = os.getenv("FIREBASE_API_KEY") or cfg.get("firebase_api_key") or ""
+    oauth_client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or cfg.get("google_oauth_client_id") or ""
+    oauth_client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or cfg.get("google_oauth_client_secret") or ""
 
     # Flags
     reconfigure = False
@@ -167,6 +178,11 @@ def start_dev(args: List[str]) -> bool:
         project = _prompt_value("GCloud project", project or "") or project
         auto_deploy = yes_all or _prompt_yes_no("Auto-deploy changed YAMLs?", default=auto_deploy)
 
+        # New: Firebase/Google OAuth configuration
+        fb_api_key = _prompt_value("Firebase API key (FIREBASE_API_KEY)", fb_api_key) or fb_api_key
+        oauth_client_id = _prompt_value("Google OAuth client ID (GOOGLE_OAUTH_CLIENT_ID)", oauth_client_id) or oauth_client_id
+        oauth_client_secret = _prompt_value("Google OAuth client secret (GOOGLE_OAUTH_CLIENT_SECRET)", oauth_client_secret) or oauth_client_secret
+
         if _prompt_yes_no("Save these settings for future dev sessions?", default=True):
             cfg = {
                 "confirmed": True,
@@ -179,8 +195,28 @@ def start_dev(args: List[str]) -> bool:
                 "workflows_dir": paths.workflows_dir,
                 "location": location,
                 "project": project,
+                # Persist auth-related fields
+                "firebase_api_key": fb_api_key,
+                "google_oauth_client_id": oauth_client_id,
+                "google_oauth_client_secret": oauth_client_secret,
             }
             save_dev_config(cfg)
+
+    # Export auth values into current process before any auth checks
+    _set_env_if_nonempty("FIREBASE_API_KEY", fb_api_key)
+    _set_env_if_nonempty("GOOGLE_OAUTH_CLIENT_ID", oauth_client_id)
+    _set_env_if_nonempty("GOOGLE_OAUTH_CLIENT_SECRET", oauth_client_secret)
+
+    # Ensure the user is authenticated for the selected project before starting services
+    selected_project = project or None
+    log_unique(
+        f"Checking authentication for project {selected_project or '(default)'} … you may be prompted to log in."
+    )
+    try:
+        ensure_active_account(selected_project, prompt_login=True)
+    except Exception as e:
+        log_unique(f"❌ Authentication check failed: {e}")
+        return False
 
     # Start services according to config
     if use_ngrok:

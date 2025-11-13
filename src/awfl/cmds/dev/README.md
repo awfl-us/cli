@@ -9,7 +9,8 @@ Purpose
   - Scala sbt-based workflow YAML generation and auto-deploy on change
 
 Key behaviors at a glance
-- dev start ensures .env exists (creates from .env.example and exits so you can fill secrets on first run).
+- dev start ensures .env exists (creates from .env.example if missing) and continues into interactive configuration on first run.
+- After completing configuration, the CLI checks authentication for the selected GCP project and may prompt you to log in via Google Device Flow. Tokens are cached per project, so you won't be prompted again once set.
 - Starts/attaches to an ngrok tunnel, waits for the https URL, and exports BASE_URL in-process.
 - Optionally brings Docker Compose up (with build) and tails logs via dev logs.
 - Starts a watcher that regenerates YAMLs (sbt) and optionally auto-deploys changes.
@@ -32,7 +33,7 @@ Design and approach
 
 Commands
 - dev start [--no-ngrok] [--no-compose] [--no-watch] [--port N] [--auto-deploy=on|off] [--compose-file PATH] [--workflows-dir PATH] [--location REGION] [--project ID] [--reconfigure|-r] [-y|--yes] [--no-prompt]
-  - Ensures .env, starts ngrok and exports BASE_URL, optionally composes up and starts the Scala watcher.
+  - Ensures .env, runs first-run configuration prompts, checks auth for the selected project, starts ngrok and exports BASE_URL, optionally composes up and starts the Scala watcher.
   - Interactive prompts are shown on first run or with --reconfigure. Selections can be saved to ~/.awfl/dev_config.json.
 - dev stop [--no-ngrok] [--no-compose]
   - Stops the watcher, composes down, and stops ngrok (mirrors dev.sh teardown).
@@ -48,12 +49,24 @@ Commands
 Configuration
 - Persisted config path: ~/.awfl/dev_config.json
   - Keys: confirmed, ngrok_port, auto_deploy, use_ngrok, use_compose, use_watch, compose_file, workflows_dir, location, project
+  - New auth keys (optional; can be left blank to use env or defaults):
+    - firebase_api_key
+    - google_oauth_client_id
+    - google_oauth_client_secret
 - Environment variables (selected):
   - AWFL_NGROK_PORT: default port for ngrok (default 8081)
   - AUTO_DEPLOY: on/off (default on)
   - AWFL_GCLOUD_LOCATION: default region (default us-central1)
   - PROJECT: default GCP project (default topaigents if unspecified in status)
   - WORKFLOW_ENV: suffix used in deploy names (e.g., Dev)
+  - FIREBASE_API_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET: override auth credentials for this shell session
+
+Auth configuration precedence
+- The CLI resolves Firebase and Google OAuth credentials at runtime with this precedence:
+  1) Process environment variables: FIREBASE_API_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
+  2) Per-repo dev config at ~/.awfl/<repo>/dev_config.json: firebase_api_key, google_oauth_client_id, google_oauth_client_secret
+  3) Built-in development defaults defined in awfl/auth.py
+- dev start exports any configured values into the current process environment before running authentication checks, so your session uses them immediately without restarting the CLI.
 
 File structure
 - commands.py: dispatches the dev subcommands (start/stop/logs/generate/deploy/status)

@@ -148,10 +148,10 @@ def trigger_workflow(name: str, data: Dict[str, Any]):
                 if not execution_name and isinstance(body.get("execution"), dict):
                     execution_name = body["execution"].get("name")
 
-            if execution_name:
-                log_unique(f"🚀 Execution started: {execution_name}")
-            else:
-                log_unique(f"🚀 Execution requested for {wf_name}")
+            # if execution_name:
+            #     log_unique(f"🚀 Execution started: {execution_name}")
+            # else:
+            #     log_unique(f"🚀 Execution requested for {wf_name}")
 
             if execution_name:
                 set_active_execution(execution_name, wf_name)

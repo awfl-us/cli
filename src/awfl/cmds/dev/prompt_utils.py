@@ -34,7 +34,7 @@ def _prompt_value(question: str, default: Optional[str] = None) -> str:
 
 
 def _ensure_env(repo_root: str) -> bool:
-    """Mimic dev.sh check_env: ensure .env exists, create from .env.example if present and stop."""
+    """Ensure .env exists; if created from .env.example, continue into prompts instead of exiting."""
     env_file = Path(repo_root) / ".env"
     if env_file.exists():
         return True
@@ -43,10 +43,11 @@ def _ensure_env(repo_root: str) -> bool:
         try:
             log_unique("Creating .env file from template…")
             shutil.copyfile(example, env_file)
-            log_unique("Please update the .env file with your API keys")
+            log_unique(".env created from template. Please update it with your API keys when convenient — continuing to configuration prompts…")
         except Exception as e:
             log_unique(f"⚠️ Failed to create .env from template: {e}")
-        return False
+        # Previously we exited on first creation; now we proceed so users can configure dev on first run.
+        return True
     # If no example, allow continuing but warn
     log_unique("ℹ️ No .env found and no .env.example to copy. Continuing without it.")
     return True

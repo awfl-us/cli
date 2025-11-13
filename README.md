@@ -29,21 +29,21 @@ Table of contents
 - Links
 
 
-Overview
+## Overview
 - AWFL is a local CLI that connects to an AI workflows service. You select a workflow (agent), chat in natural language, and the agent can execute side effects via tool calls such as writing files or running commands.
 - The CLI streams events using Server‑Sent Events (SSE) and ensures side effects are executed exactly once per project, even if you’ve opened multiple terminals.
 
 
-Features
+## Features
 - Talk to codebase‑aware agents from your terminal.
 - Apply tool calls safely: write files, run shell commands, and more.
 - Live event streaming with clear, deduplicated logs.
 - Project‑wide leader election to avoid duplicate side effects across terminals.
 - Flexible execution backends (API mode today; gcloud compatibility in progress).
-- Developer helpers for local workflow development (watcher, logs, deploy).
+- Developer helpers for local workflow development (watcher, deploy, logs).
 
 
-Installation
+## Installation
 - Prerequisites
   - Python 3.11+
   - Optional but recommended: pipx for isolated CLI installs
@@ -66,18 +66,37 @@ Installation
   - Run: awfl --help
 
 
-Quick start
-- Launch
-  - From your project directory: awfl
-  - On first run you’ll be prompted to sign in with your Google identity (device login flow). Tokens are cached locally.
-- Pick an agent
-  - At the awfl prompt, type: workflows (or ls)
-  - Use the tree selector to choose a workflow. Codebase‑oriented agents live under the “codebase” menu.
-- Ask for help
-  - Type your request in natural language. The selected agent will respond and, when appropriate, issue tool calls (e.g., write files, run commands). The project leader terminal applies these side effects; all terminals display them.
+## Quick start
+The fastest path from install to first agent response.
+
+- 1) Install the CLI
+  - pipx install awfl
+
+- 2) Point the CLI at your server (optional; defaults to http://localhost:5050)
+  - awfl set api_origin http://localhost:5050
+
+- 3) Launch and sign in
+  - awfl
+  - On first run you’ll be prompted to complete a Google Device Login. Tokens are cached under ~/.awfl.
+
+- 4) Choose an agent and ask for help
+  - At the prompt:
+    - workflows  # open the selector
+    - Pick: codebase-ProjectManager
+    - Then type a request, for example: "Create a CONTRIBUTING.md and add an install badge to README"
+
+Copy/paste one‑liner (uses default origin):
+```
+pipx install awfl && awfl
+```
+
+If your server isn’t at http://localhost:5050, run this once before launching:
+```
+awfl set api_origin https://your-server.example.com
+```
 
 
-Demo
+## Demo
 - Watch: See recording and export options in docs/DEMO.md.
 - Transcript (60 seconds)
   ```
@@ -98,7 +117,7 @@ Demo
   ```
 
 
-Usage
+## Usage
 - Essential commands
   - workflows | ls
     - Open the interactive workflow selector and set the active agent for this session.
@@ -108,6 +127,10 @@ Usage
     - View or set the LLM model injected into workflow requests.
   - stop | cancel | abort
     - Cancel the currently active workflow execution.
+  - deploy awfl workflows
+    - Generate YAMLs and deploy the core AWFL utility workflows required by many custom agent workflows (ProjectManager, ToolDefs, ToolDispatcher, Tasks). Requires sbt and gcloud; there is no touch fallback.
+  - deploy workflows
+    - Regenerate and deploy all workflows in the repository. Requires sbt and gcloud; there is no touch fallback.
   - status
     - Show execution mode, API origin, active workflow, and other runtime details.
   - set api_origin <url>
@@ -128,7 +151,7 @@ Usage
   - You can skip auth in trusted local development with an environment flag (see status).
 
 
-How it works (high level)
+## How it works (high level)
 - Sessions
   - Session identity is resolved in order: ASSISTANT_WORKFLOW env (normalized) > selected active workflow (normalized) > local UUID fallback.
 - Event streaming and side effects
@@ -137,7 +160,7 @@ How it works (high level)
   - The CLI posts to your server’s /api/workflows/execute, including the active model and session metadata. See AGENT.md for deeper internals.
 
 
-Troubleshooting
+## Troubleshooting
 - Login loop or auth errors
   - Run auth login again and confirm the device flow. Check whoami afterwards.
 - No workflows listed
@@ -146,7 +169,7 @@ Troubleshooting
   - Another terminal likely holds the project leader role. That’s expected. Close it if you want this terminal to take over.
 
 
-Development
+## Development
 - Repository layout
   - src/awfl: CLI sources (entry point, commands, consumers, response handling, utils)
   - src/awfl/cmds/dev: Developer helpers (watcher, deploy, logs)
@@ -158,12 +181,14 @@ Development
   - awfl dev start: Start ngrok/compose/watcher tasks as needed (returns to prompt)
   - awfl dev generate-yamls: Regenerate workflow YAMLs (project‑specific)
   - awfl dev deploy-workflow <yaml>: Deploy a single workflow via gcloud
+  - awfl deploy awfl workflows: Generate and deploy only the core AWFL utility workflows. Use this to bootstrap a project’s environment before deploying custom agents.
+
 - Notes
   - Prefer installing and running within a project‑local virtualenv to avoid path mismatches.
   - When spawning Python subprocesses, the CLI uses the current interpreter to keep environments consistent.
 
 
-Contributing
+## Contributing
 - Issues and feature requests are welcome: https://github.com/awfl-us/cli/issues
 - Pull requests
   - Fork the repo and create a feature branch.
@@ -174,11 +199,11 @@ Contributing
   - Be respectful and constructive. Harassment or discrimination are not tolerated.
 
 
-License
+## License
 - MIT — see LICENSE for details.
 
 
-Links
+## Links
 - Homepage: https://github.com/awfl-us/cli
 - Issues: https://github.com/awfl-us/cli/issues
 - Internals overview: see AGENT.md in the repo’s root
