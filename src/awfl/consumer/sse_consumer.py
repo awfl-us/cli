@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 import random
+import contextlib
 from typing import Optional, Tuple
 
 import aiohttp
@@ -47,6 +49,11 @@ async def consume_events_sse(
     - For project scope, ensures single-leader per project using a local lock.
     - For session scope, will NOT create a project if missing; waits until the project exists to avoid duplicate creation.
     - Robust reconnection with backoff and jitter; reacts to session change for session scope.
+
+    Returns a small string status on termination to help the caller classify the outcome:
+    - "skipped-lock": Project consumer skipped because another instance holds the leader lock (benign).
+    - "cancelled": Task was cancelled (shutdown) (benign).
+    - "ended": Stream ended and loop exited (unexpected).
     """
     # Resolve defaults
     if stream_url is None:
@@ -69,7 +76,23 @@ async def consume_events_sse(
     backoff = 1.0
     backoff_max = 30.0
 
-    async with aiohttp.ClientSession() as session_http:
+    # Configure socket timeouts to recover from half-open connections after sleep
+    try:
+        sock_read_timeout = float(os.getenv("AWFL_SSE_SOCK_READ_TIMEOUT_SECS", "90"))
+        if sock_read_timeout <= 0:
+            client_timeout = aiohttp.ClientTimeout(total=None)
+        else:
+            client_timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=sock_read_timeout)
+    except Exception:
+        client_timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=90)
+
+    # Application-level idle stall watchdog (covers cases where sock_read timeout fails on macOS sleep)
+    try:
+        idle_stall_secs = float(os.getenv("AWFL_SSE_IDLE_STALL_SECS", "75"))
+    except Exception:
+        idle_stall_secs = 75.0
+
+    async with aiohttp.ClientSession(timeout=client_timeout) as session_http:
         project_id_for_lock: Optional[str] = None
         leader_acquired = False
 
@@ -104,9 +127,9 @@ async def consume_events_sse(
                 if not leader_acquired:
                     if not try_acquire_project_leader(project_id_for_lock):
                         log_unique(
-                            f"🪄 Project-wide SSE already active for project {project_id_for_lock}; skipping in this terminal."
+                            f"🦬 Project-wide SSE already active for project {project_id_for_lock}; skipping in this terminal."
                         )
-                        return  # do not consume project-wide in this process
+                        return "skipped-lock"  # do not consume project-wide in this process
                     leader_acquired = True
                     dbg(f"Acquired project-wide leader lock for {project_id_for_lock}")
 
@@ -154,7 +177,7 @@ async def consume_events_sse(
             )
 
             try:
-                async with session_http.get(stream_url, headers=headers, params=params, timeout=None) as resp:
+                async with session_http.get(stream_url, headers=headers, params=params) as resp:
                     if resp.status != 200:
                         text = await resp.text()
                         log_unique(f"❌ SSE connect failed ({resp.status}): {text[:500]}")
@@ -171,90 +194,120 @@ async def consume_events_sse(
                     parser = SSEParser()
                     evt_count = 0
 
-                    async for raw in resp.content:
-                        # If user switches CLI session, reconnect to new workspace (session scope only)
-                        if scope == "session":
-                            try:
-                                current_session_id = get_session()
-                            except Exception:
-                                current_session_id = last_session_id
-                            if current_session_id != last_session_id:
-                                log_unique("🔄 Session changed; reconnecting SSE for new workspace...")
-                                break
+                    # Idle stall watchdog task; force-close response if no bytes are seen for idle_stall_secs
+                    last_activity = asyncio.get_event_loop().time()
 
-                        try:
-                            line = raw.decode("utf-8", errors="ignore")
-                        except Exception:
-                            # If decoding fails, skip chunk
-                            continue
-
-                        for l in line.splitlines(True):  # keepends True to preserve newlines
-                            evt = parser.feed_line(l)
-                            if evt is None:
-                                continue
-
-                            # Dispatch complete SSE event
-                            evt_id = evt.get("id")
-                            data_text = evt.get("data") or ""
-                            evt_type = evt.get("event") or "message"
-
-                            if not data_text.strip():
-                                # Ignore empty data events (e.g., heartbeat edge cases)
-                                dbg("Empty data event; ignored")
-                                continue
-                            evt_count += 1
-                            dbg(
-                                f"evt#{evt_count} (type={evt_type}) id={evt_id} data_len={len(data_text)} preview={data_text[:160].replace('\n',' ')}"
-                            )
-                            try:
-                                obj = json.loads(data_text)
-                            except Exception as e:
-                                log_unique(
-                                    f"⚠️ SSE event JSON parse error: {e}. data[0:200]={data_text[:200]}"
-                                )
-                                continue
-
-                            # Forward to CLI response handler according to scope
-                            try:
-                                mode = "execute" if scope == "project" else "log"
-                                await forward_event(obj, mode=mode)  # project executes silently; session logs only
-                            except Exception as e:
-                                log_unique(f"⚠️ Error handling SSE event: {e}")
-
-                            # Persist new cursor remotely per project/session
-                            if evt_id:
-                                # Prefer server-provided create_time if present; else fall back to local time string
-                                ts = obj.get("create_time") or obj.get("time")
-                                if ts is None:
+                    async def _idle_watchdog():
+                        if idle_stall_secs and idle_stall_secs > 0:
+                            # Check roughly every 5 seconds (or 1/3 of stall window if small)
+                            interval = max(1.0, min(5.0, idle_stall_secs / 3.0))
+                            while True:
+                                await asyncio.sleep(interval)
+                                now = asyncio.get_event_loop().time()
+                                if now - last_activity > idle_stall_secs:
+                                    log_unique(
+                                        f"🧊 SSE idle for ~{int(now - last_activity)}s (threshold={int(idle_stall_secs)}s); forcing reconnect..."
+                                    )
                                     try:
-                                        # Avoid import at top to keep light; local import
-                                        import time as _time
-
-                                        ts = str(_time.time())
+                                        resp.close()
                                     except Exception:
-                                        ts = ""
+                                        pass
+                                    break
+
+                    idle_task = asyncio.create_task(_idle_watchdog(), name="sse-idle-watchdog")
+                    try:
+                        async for raw in resp.content:
+                            # mark activity for watchdog
+                            last_activity = asyncio.get_event_loop().time()
+
+                            # If user switches CLI session, reconnect to new workspace (session scope only)
+                            if scope == "session":
                                 try:
-                                    if scope == "session":
-                                        await update_cursor(
-                                            session_http,
-                                            event_id=str(evt_id),
-                                            project_id=project_id,
-                                            session_id=forced_session_id,
-                                            workspace_id=ws_id,
-                                            scope="session",
-                                            timestamp=str(ts) if ts is not None else None,
-                                        )
-                                    else:
-                                        await update_cursor(
-                                            session_http,
-                                            event_id=str(evt_id),
-                                            project_id=project_id,
-                                            workspace_id=ws_id,
-                                            scope="project",
-                                            timestamp=str(ts) if ts is not None else None,
-                                        )
+                                    current_session_id = get_session()
+                                except Exception:
+                                    current_session_id = last_session_id
+                                if current_session_id != last_session_id:
+                                    log_unique("🔄 Session changed; reconnecting SSE for new workspace...")
+                                    break
+
+                            try:
+                                line = raw.decode("utf-8", errors="ignore")
+                            except Exception:
+                                # If decoding fails, skip chunk
+                                continue
+
+                            for l in line.splitlines(True):  # keepends True to preserve newlines
+                                evt = parser.feed_line(l)
+                                if evt is None:
+                                    continue
+
+                                # Dispatch complete SSE event
+                                evt_id = evt.get("id")
+                                data_text = evt.get("data") or ""
+                                evt_type = evt.get("event") or "message"
+
+                                if not data_text.strip():
+                                    # Ignore empty data events (e.g., heartbeat edge cases)
+                                    dbg("Empty data event; ignored")
+                                    continue
+                                evt_count += 1
+                                dbg(
+                                    f"evt#{evt_count} (type={evt_type}) id={evt_id} data_len={len(data_text)} preview={data_text[:160].replace('\n',' ')}"
+                                )
+                                try:
+                                    obj = json.loads(data_text)
                                 except Exception as e:
-                                    log_unique(f"⚠️ Failed to update cursor: {e}")
+                                    log_unique(
+                                        f"⚠️ SSE event JSON parse error: {e}. data[0:200]={data_text[:200]}"
+                                    )
+                                    continue
+
+                                # Forward to CLI response handler according to scope
+                                try:
+                                    mode = "execute" if scope == "project" else "log"
+                                    await forward_event(obj, mode=mode)  # project executes silently; session logs only
+                                except Exception as e:
+                                    log_unique(f"⚠️ Error handling SSE event: {e}")
+
+                                # Persist new cursor remotely per project/session
+                                if evt_id:
+                                    # Prefer server-provided create_time if present; else fall back to local time string
+                                    ts = obj.get("create_time") or obj.get("time")
+                                    if ts is None:
+                                        try:
+                                            # Avoid import at top to keep light; local import
+                                            import time as _time
+
+                                            ts = str(_time.time())
+                                        except Exception:
+                                            ts = ""
+                                    try:
+                                        if scope == "session":
+                                            await update_cursor(
+                                                session_http,
+                                                event_id=str(evt_id),
+                                                project_id=project_id,
+                                                session_id=forced_session_id,
+                                                workspace_id=ws_id,
+                                                scope="session",
+                                                timestamp=str(ts) if ts is not None else None,
+                                            )
+                                        else:
+                                            await update_cursor(
+                                                session_http,
+                                                event_id=str(evt_id),
+                                                project_id=project_id,
+                                                workspace_id=ws_id,
+                                                scope="project",
+                                                timestamp=str(ts) if ts is not None else None,
+                                            )
+                                    except Exception as e:
+                                        log_unique(f"⚠️ Failed to update cursor: {e}")
+                    finally:
+                        if not idle_task.done():
+                            idle_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await idle_task
 
                     # If we exit the async for, the connection closed or workspace changed. Fall through to reconnect.
                     log_unique("ℹ️ SSE connection ended; reconnecting...")
@@ -265,7 +318,12 @@ async def consume_events_sse(
                 # Release leader lock if held
                 if scope == "project" and project_id_for_lock and leader_acquired:
                     release_project_leader(project_id_for_lock)
-                return
+                return "cancelled"
+            except asyncio.TimeoutError:
+                # Socket read timeout (likely sleep/half-open). Reconnect.
+                log_unique("⌛ SSE read timed out; reconnecting to recover from possible sleep/half-open state...")
+                await asyncio.sleep(min(backoff, 5.0) + random.random())
+                backoff = min(backoff * 2, backoff_max)
             except Exception as e:
                 # Network or parsing error -> backoff and retry
                 log_unique(f"⚠️ SSE error: {e}; reconnecting in ~{backoff:.1f}s")
@@ -278,3 +336,4 @@ async def consume_events_sse(
         # Not reached, but ensure lock release
         if scope == "project" and project_id_for_lock and leader_acquired:
             release_project_leader(project_id_for_lock)
+        return "ended"

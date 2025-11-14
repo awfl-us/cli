@@ -178,6 +178,9 @@ def deploy_awfl_workflows(generate_only: bool = False) -> bool:
         "us.awfl.workflows.helpers.Tasks",
         "us.awfl.workflows.tools.CliTools",
         "us.awfl.workflows.tools.Tasks",
+        "us.awfl.workflows.Summaries",
+        "us.awfl.workflows.assistant.ExtractTopics",
+        "us.awfl.workflows.context.ContextCollapser"
     ]
 
     if not (generate_for_classes):

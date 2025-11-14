@@ -124,6 +124,7 @@ def _is_long_running_startup(cmd: str) -> bool:
 
 def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.Event, *, fatal: bool):
     def _cb(t: asyncio.Task):
+        # Classify completion of a consumer task and decide whether the CLI should exit
         try:
             exc = t.exception()
         except asyncio.CancelledError:
@@ -133,21 +134,48 @@ def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.E
             # If we cannot access exception(), treat as unknown
             exc = e
 
-        if exc:
+        if exc is not None:
             # Any unhandled exception in a consumer is fatal for its classification
-            if fatal:
+            if fatal or name == "project":
                 wf_utils.log_unique(f"❌ {name} SSE consumer ended with error: {exc}")
                 evt.set()
             else:
                 wf_utils.log_unique(f"⚠️ {name} SSE consumer ended with error (non-fatal): {exc}")
             return
 
-        # Normal completion (e.g., project consumer skipped due to leader lock)
+        # No exception -> check the returned status to distinguish benign vs fatal exits
+        try:
+            status = t.result()
+        except asyncio.CancelledError:
+            # Treat cancel as benign (we likely initiated shutdown)
+            return
+        except Exception as e:
+            # Unexpected failure retrieving result: treat as fatal for safety
+            wf_utils.log_unique(f"❌ {name} SSE consumer ended unexpectedly (could not read result: {e}).")
+            evt.set()
+            return
+
+        # Project consumer: only benign when lock was skipped or task was cancelled; otherwise fatal
+        if name == "project":
+            if status in ("skipped-lock", "cancelled"):
+                if status == "skipped-lock":
+                    wf_utils.log_unique(
+                        "ℹ️ project SSE consumer ended (non-fatal): another instance holds the project leader lock; continuing without project-wide execution in this terminal."
+                    )
+                else:
+                    wf_utils.log_unique("ℹ️ project SSE consumer cancelled during shutdown (non-fatal).")
+                return
+            # Any other terminal state is unexpected -> crash CLI so user can restart and regain execution
+            wf_utils.log_unique(f"❌ project SSE consumer ended unexpectedly (status={status!r}). Exiting.")
+            evt.set()
+            return
+
+        # Session consumer: any normal completion is fatal; we rely on it for logs
         if fatal:
-            wf_utils.log_unique(f"❌ {name} SSE consumer ended.")
+            wf_utils.log_unique(f"❌ {name} SSE consumer ended (status={status!r}).")
             evt.set()
         else:
-            wf_utils.log_unique(f"ℹ️ {name} SSE consumer ended (non-fatal).")
+            wf_utils.log_unique(f"ℹ️ {name} SSE consumer ended (non-fatal, status={status!r}).")
 
     task.add_done_callback(_cb)
 
@@ -173,7 +201,8 @@ async def main():
     consumer_shutdown_evt = asyncio.Event()
     project_consumer = asyncio.create_task(consume_events_sse(scope="project"), name="sse-project")
     session_consumer = asyncio.create_task(consume_events_sse(scope="session"), name="sse-session")
-    _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt, fatal=False)
+    # Treat both consumers as fatal sources; project consumer will still classify skipped-lock/cancel as benign internally
+    _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt, fatal=True)
     _attach_crash_on_consumer_exit(session_consumer, "session", consumer_shutdown_evt, fatal=True)
 
     # If a long-running startup command was provided, execute it now inside the running event loop
