@@ -74,14 +74,11 @@ The fastest path from install to first agent response.
 - 1) Install the CLI
   - pipx install awfl
 
-- 2) Point the CLI at your server (optional; defaults to http://localhost:5050)
-  - awfl set api_origin http://localhost:5050
-
-- 3) Launch and sign in
+- 2) Launch and sign in
   - awfl
   - On first run you’ll be prompted to complete a Google Device Login. Tokens are cached under ~/.awfl.
 
-- 4) Choose an agent and ask for help
+- 3) Choose an agent and ask for help
   - At the prompt:
     - workflows  # open the selector
     - Pick: codebase-ProjectManager
