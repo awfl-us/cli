@@ -14,7 +14,7 @@ from awfl.events.workspace import resolve_project_id, get_or_create_workspace
 
 from .cursors import get_resume_event_id, update_cursor
 from .sse_parser import SSEParser
-from .leader_lock import try_acquire_project_leader, release_project_leader
+from .leader_lock import get_consumer_id, acquire_lock, release_lock
 from .routing import forward_event
 from .debug import dbg, is_debug
 
@@ -46,12 +46,13 @@ async def consume_events_sse(
     - Resolves project by normalized git remote.
     - Resolves/registers a workspace per project and desired scope (session or project-wide).
     - Connects to /workflows/events/stream?workspaceId=... and resumes via Last-Event-ID per project/session.
-    - For project scope, ensures single-leader per project using a local lock.
+    - For project scope, ensures single-leader per project using a server-side lease lock.
     - For session scope, will NOT create a project if missing; waits until the project exists to avoid duplicate creation.
     - Robust reconnection with backoff and jitter; reacts to session change for session scope.
 
     Returns a small string status on termination to help the caller classify the outcome:
     - "skipped-lock": Project consumer skipped because another instance holds the leader lock (benign).
+    - "lost-lock": Project consumer lost the server lock while running (fatal at top level).
     - "cancelled": Task was cancelled (shutdown) (benign).
     - "ended": Stream ended and loop exited (unexpected).
     """
@@ -92,9 +93,135 @@ async def consume_events_sse(
     except Exception:
         idle_stall_secs = 75.0
 
+    # Lock lease and refresh tuning
+    def _clamp_lease(ms: int) -> int:
+        # Server bounds: min 5s, default 45s, max 10m
+        return max(5000, min(ms, 600000))
+
+    try:
+        lease_ms = int(os.getenv("AWFL_LOCK_LEASE_MS", "45000"))
+    except Exception:
+        lease_ms = 45000
+    lease_ms = _clamp_lease(lease_ms)
+
+    try:
+        refresh_interval_secs = float(os.getenv("AWFL_LOCK_REFRESH_INTERVAL_SECS", "31"))
+    except Exception:
+        refresh_interval_secs = 31.0
+    # Safety: never refresh at/after expiry; keep at least 5s headroom
+    lease_secs = lease_ms / 1000.0
+    refresh_interval_secs = min(refresh_interval_secs, max(1.0, lease_secs - 5.0))
+
     async with aiohttp.ClientSession(timeout=client_timeout) as session_http:
         project_id_for_lock: Optional[str] = None
         leader_acquired = False
+        lost_lock = False
+        refresher_task: Optional[asyncio.Task] = None
+
+        # Parent task handle for cooperative cancellation
+        parent_task = asyncio.current_task()
+
+        async def _start_or_confirm_lock(project_id: str) -> Optional[str]:
+            nonlocal leader_acquired
+            nonlocal refresher_task
+            nonlocal lost_lock
+
+            # Attempt to acquire/refresh lock; retry transiently if unknown status
+            attempt = 0
+            while True:
+                attempt += 1
+                acquired, refreshed, conflict, payload = await acquire_lock(
+                    session_http,
+                    project_id=project_id,
+                    lease_ms=lease_ms,
+                )
+                if conflict:
+                    # Another consumer holds the lock
+                    # Try to include expiry hint if present
+                    expires_in = None
+                    try:
+                        lock = (payload or {}).get("lock") or {}
+                        expires_in = lock.get("expiresInMs") or lock.get("expiresIn")
+                    except Exception:
+                        expires_in = None
+                    if expires_in is not None:
+                        log_unique(
+                            f"🦬 Project-wide SSE already active for project {project_id}; skipping in this terminal (lock expires in ~{int(expires_in)/1000:.0f}s)."
+                        )
+                    else:
+                        log_unique(
+                            f"🦬 Project-wide SSE already active for project {project_id}; skipping in this terminal."
+                        )
+                    return "skipped-lock"
+                if acquired or refreshed:
+                    leader_acquired = True
+                    cid = get_consumer_id()
+                    if acquired:
+                        log_unique(
+                            f"🔐 Acquired project consumer lock for {project_id} as {cid} (lease={lease_ms}ms)"
+                        )
+                    else:
+                        log_unique(
+                            f"🔄 Refreshed project consumer lock for {project_id} as {cid} (lease={lease_ms}ms)"
+                        )
+                    # Start refresher if not already running
+                    if not refresher_task or refresher_task.done():
+                        refresher_task = asyncio.create_task(
+                            _lease_refresher(project_id), name="awfl-lock-refresher"
+                        )
+                    return None
+                # Unknown/other response; backoff and retry a few times, then keep trying with capped backoff
+                delay = min(5.0, 0.5 * attempt) + random.random()
+                log_unique(
+                    f"⚠️ Lock acquire/refresh returned indeterminate status (attempt {attempt}); retrying in ~{delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
+
+        # lease refresher impl
+        async def _lease_refresher(project_id: str):
+            nonlocal lost_lock
+
+            last_success = asyncio.get_event_loop().time()
+            while True:
+                await asyncio.sleep(refresh_interval_secs)
+                acquired, refreshed, conflict, _payload = await acquire_lock(
+                    session_http,
+                    project_id=project_id,
+                    lease_ms=lease_ms,
+                )
+                now = asyncio.get_event_loop().time()
+                if conflict:
+                    log_unique(
+                        "❌ Lost project consumer lock due to conflict with another active consumer; terminating."
+                    )
+                    # signal fatal termination by cancelling parent task
+                    # nonlocal lost_lock
+                    lost_lock = True
+                    if parent_task:
+                        parent_task.cancel()
+                    return
+                if acquired or refreshed:
+                    last_success = now
+                    # Optional: keep refresh logs light
+                    dbg(
+                        f"Refreshed project lock for {project_id} (acquired={acquired}, refreshed={refreshed})"
+                    )
+                else:
+                    # Transient failure; if we've exceeded lease window since last success, treat as lost
+                    since_ok = now - last_success
+                    if since_ok > lease_secs:
+                        log_unique(
+                            "❌ Lost project consumer lock (lease expired without successful refresh); terminating."
+                        )
+                        # nonlocal lost_lock
+                        lost_lock = True
+                        if parent_task:
+                            parent_task.cancel()
+                        return
+                    else:
+                        log_unique(
+                            f"⚠️ Lock refresh failed; will retry (grace ~{int(lease_secs - since_ok)}s remaining)"
+                        )
 
         while True:
             # Resolve project and workspace according to scope
@@ -121,17 +248,13 @@ async def consume_events_sse(
                 backoff = min(backoff * 2, backoff_max)
                 continue
 
-            # For project-wide scope, ensure only one live consumer per project on this machine
+            # For project-wide scope, ensure only one live consumer per project using server lock
             if scope == "project":
                 project_id_for_lock = project_id
                 if not leader_acquired:
-                    if not try_acquire_project_leader(project_id_for_lock):
-                        log_unique(
-                            f"🦬 Project-wide SSE already active for project {project_id_for_lock}; skipping in this terminal."
-                        )
-                        return "skipped-lock"  # do not consume project-wide in this process
-                    leader_acquired = True
-                    dbg(f"Acquired project-wide leader lock for {project_id_for_lock}")
+                    reason = await _start_or_confirm_lock(project_id_for_lock)
+                    if reason == "skipped-lock":
+                        return "skipped-lock"  # benign skip
 
             # Reset backoff when switching workspaces to be responsive
             if ws_id != last_ws_id:
@@ -230,6 +353,10 @@ async def consume_events_sse(
                                     log_unique("🔄 Session changed; reconnecting SSE for new workspace...")
                                     break
 
+                            # If lost lock was signaled while streaming, break to unwind
+                            if scope == "project" and lost_lock:
+                                break
+
                             try:
                                 line = raw.decode("utf-8", errors="ignore")
                             except Exception:
@@ -314,10 +441,24 @@ async def consume_events_sse(
 
             except asyncio.CancelledError:
                 # Task canceled: exit cleanly
-                log_unique("🛑 SSE consumer canceled; closing.")
-                # Release leader lock if held
                 if scope == "project" and project_id_for_lock and leader_acquired:
-                    release_project_leader(project_id_for_lock)
+                    try:
+                        ok, released, conflict, _ = await release_lock(
+                            session_http, project_id=project_id_for_lock
+                        )
+                        if ok and released:
+                            log_unique("🔓 Released project consumer lock")
+                        elif ok and not released:
+                            log_unique("ℹ️ Lock release reported no active lock (already released or expired)")
+                        elif conflict:
+                            log_unique("⚠️ Lock release conflict; another holder present")
+                        else:
+                            log_unique("⚠️ Lock release failed")
+                    except Exception:
+                        log_unique("⚠️ Failed to release project consumer lock")
+                if scope == "project" and lost_lock:
+                    return "lost-lock"
+                log_unique("🛑 SSE consumer canceled; closing.")
                 return "cancelled"
             except asyncio.TimeoutError:
                 # Socket read timeout (likely sleep/half-open). Reconnect.
@@ -335,5 +476,10 @@ async def consume_events_sse(
 
         # Not reached, but ensure lock release
         if scope == "project" and project_id_for_lock and leader_acquired:
-            release_project_leader(project_id_for_lock)
+            try:
+                ok, released, conflict, _ = await release_lock(session_http, project_id=project_id_for_lock)
+                if ok and released:
+                    log_unique("🔓 Released project consumer lock")
+            except Exception:
+                pass
         return "ended"
