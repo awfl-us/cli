@@ -218,23 +218,5 @@ def ls_workflows_interactive() -> None:
     # Try remote API first
     names = _fetch_remote_workflow_names(location=None)
 
-    # if not names:
-    #     # Graceful fallback to local directory listing
-    #     workflows_dir = resolve_workflows_dir()
-    #     names = collect_workflow_names(workflows_dir)
-    #     if not names:
-    #         log_unique(f"No workflows found under {workflows_dir}.")
-    #         return
-    #     p = Path(workflows_dir)
-    #     if p.name == "yaml_gens" and p.parent.name == "workflows":
-    #         display_dir = "workflows/yaml_gens"
-    #     else:
-    #         orig = get_orig_cwd()
-    #         try:
-    #             display_dir = os.path.relpath(workflows_dir, start=orig)
-    #         except Exception:
-    #             display_dir = workflows_dir
-    #     log_unique(f"📁 Listing workflows from local disk: {display_dir}")
-
     tree = build_tree(names)
     navigate_tree(tree)

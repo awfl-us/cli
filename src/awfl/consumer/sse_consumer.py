@@ -137,16 +137,22 @@ async def consume_events_sse(
                 )
                 if conflict:
                     # Another consumer holds the lock
-                    # Try to include expiry hint if present
-                    expires_in = None
+                    # Prefer top-level msRemaining; fall back to holder.expiresInMs
+                    expires_in_ms = None
                     try:
-                        lock = (payload or {}).get("lock") or {}
-                        expires_in = lock.get("expiresInMs") or lock.get("expiresIn")
+                        if isinstance(payload, dict):
+                            if payload.get("msRemaining") is not None:
+                                expires_in_ms = int(payload.get("msRemaining"))
+                            else:
+                                holder = payload.get("holder") or {}
+                                v = holder.get("expiresInMs") or holder.get("expiresIn")
+                                if v is not None:
+                                    expires_in_ms = int(v)
                     except Exception:
-                        expires_in = None
-                    if expires_in is not None:
+                        expires_in_ms = None
+                    if expires_in_ms is not None:
                         log_unique(
-                            f"🦬 Project-wide SSE already active for project {project_id}; skipping in this terminal (lock expires in ~{int(expires_in)/1000:.0f}s)."
+                            f"🦬 Project-wide SSE already active for project {project_id}; skipping in this terminal (lock expires in ~{int(expires_in_ms)/1000:.0f}s)."
                         )
                     else:
                         log_unique(
@@ -181,47 +187,55 @@ async def consume_events_sse(
         async def _lease_refresher(project_id: str):
             nonlocal lost_lock
 
-            last_success = asyncio.get_event_loop().time()
+            loop = asyncio.get_event_loop()
+            last_success = loop.time()
+            # Start with the normal interval; on failures we switch to shorter retries
+            next_delay = refresh_interval_secs
+            # Short retry baseline: 1s..5s depending on lease length
+            short_retry_floor = max(1.0, min(5.0, lease_secs / 10.0))
+
             while True:
-                await asyncio.sleep(refresh_interval_secs)
+                await asyncio.sleep(next_delay)
                 acquired, refreshed, conflict, _payload = await acquire_lock(
                     session_http,
                     project_id=project_id,
                     lease_ms=lease_ms,
                 )
-                now = asyncio.get_event_loop().time()
+                now = loop.time()
                 if conflict:
                     log_unique(
                         "❌ Lost project consumer lock due to conflict with another active consumer; terminating."
                     )
-                    # signal fatal termination by cancelling parent task
-                    # nonlocal lost_lock
                     lost_lock = True
                     if parent_task:
                         parent_task.cancel()
                     return
                 if acquired or refreshed:
                     last_success = now
+                    next_delay = refresh_interval_secs
                     # Optional: keep refresh logs light
                     dbg(
                         f"Refreshed project lock for {project_id} (acquired={acquired}, refreshed={refreshed})"
                     )
-                else:
-                    # Transient failure; if we've exceeded lease window since last success, treat as lost
-                    since_ok = now - last_success
-                    if since_ok > lease_secs:
-                        log_unique(
-                            "❌ Lost project consumer lock (lease expired without successful refresh); terminating."
-                        )
-                        # nonlocal lost_lock
-                        lost_lock = True
-                        if parent_task:
-                            parent_task.cancel()
-                        return
-                    else:
-                        log_unique(
-                            f"⚠️ Lock refresh failed; will retry (grace ~{int(lease_secs - since_ok)}s remaining)"
-                        )
+                    continue
+
+                # Transient failure; retry sooner than the full interval to avoid lease expiry
+                since_ok = now - last_success
+                remaining = max(0.0, lease_secs - since_ok)
+                if remaining <= 0:
+                    log_unique(
+                        "❌ Lost project consumer lock (lease expired without successful refresh); terminating."
+                    )
+                    lost_lock = True
+                    if parent_task:
+                        parent_task.cancel()
+                    return
+                # Retry quickly within the remaining grace window
+                # Aim to try multiple times before expiry with a bit of jitter
+                next_delay = max(short_retry_floor, min(5.0, remaining / 3.0)) + random.random()
+                log_unique(
+                    f"⚠️ Lock refresh failed; retrying in ~{next_delay:.1f}s (grace ~{int(remaining)}s remaining)"
+                )
 
         while True:
             # Resolve project and workspace according to scope

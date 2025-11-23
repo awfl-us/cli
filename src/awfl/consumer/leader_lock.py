@@ -57,7 +57,9 @@ async def acquire_lock(
     """Attempt to acquire or refresh the project consumer lock.
 
     Returns a tuple: (acquired, refreshed, conflict, payload)
-    - acquired/refreshed are True on 200 OK success
+    - acquired/refreshed reflect the server contract for 200 OK responses:
+      - acquired == True when ok==true and refreshed!=true
+      - refreshed == True when ok==true and refreshed==true
     - conflict is True on 409 responses
     - payload is the parsed JSON body from the server (may be empty on errors)
     """
@@ -77,12 +79,16 @@ async def acquire_lock(
         headers["x-consumer-id"] = cid
     if lease_ms and lease_ms > 0:
         headers["x-lock-lease-ms"] = str(int(lease_ms))
+    # Convey consumer type via header as well (server accepts either header or body)
+    headers["x-consumer-type"] = "LOCAL"
 
     body: Dict[str, Any] = {}
     if cid:
         body["consumerId"] = cid
     if lease_ms and lease_ms > 0:
         body["leaseMs"] = int(lease_ms)
+
+    body["consumerType"] = "LOCAL"
 
     try:
         async with session_http.post(url, json=body, headers=headers) as resp:
@@ -92,11 +98,16 @@ async def acquire_lock(
             except Exception:
                 data = {}
             if status == 200:
-                # Success: either acquired or refreshed
-                acquired = bool(data.get("acquired"))
-                refreshed = bool(data.get("refreshed"))
+                # Success per server contract:
+                #   { ok: true, lock: {...} } on new acquire
+                #   { ok: true, lock: {...}, refreshed: true } on refresh
+                ok = bool(data.get("ok"))
+                refreshed = bool(data.get("refreshed")) if ok else False
+                acquired = bool(ok and not refreshed)
                 return acquired, refreshed, False, data
             elif status == 409:
+                # Conflict per server contract:
+                #   { ok: false, conflict: true, holder: {...}, msRemaining: <number> }
                 return False, False, True, data
             else:
                 # Treat other codes as not acquired and not a conflict
@@ -135,6 +146,7 @@ async def release_lock(
         headers["x-consumer-id"] = cid
     if force:
         headers["x-lock-force"] = "1"
+    headers["x-consumer-type"] = "LOCAL"
 
     body: Dict[str, Any] = {}
     if cid:

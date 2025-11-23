@@ -205,15 +205,20 @@ async def main():
     _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt, fatal=True)
     _attach_crash_on_consumer_exit(session_consumer, "session", consumer_shutdown_evt, fatal=True)
 
-    # If a long-running startup command was provided, execute it now inside the running event loop
+    # If a long-running startup command was provided, execute it without hopping threads,
+    # so any dev watcher can create asyncio tasks on this event loop safely.
     bootstrap_cmd = os.environ.pop("AWFL_BOOTSTRAP_CMD", None)
     if bootstrap_cmd:
-        try:
-            handle_command(bootstrap_cmd)
-            # Keep session aligned after potential workflow changes
-            set_session(_compute_session_workflow_name())
-        except Exception as e:
-            log_unique(f"⚠️ Error executing startup command '{bootstrap_cmd}': {e}")
+        async def _run_bootstrap():
+            try:
+                # Run directly in the event loop thread to avoid 'coroutine was never awaited'
+                # when watch_workflows() creates tasks.
+                handle_command(bootstrap_cmd)
+                # Keep session aligned after potential workflow changes
+                set_session(_compute_session_workflow_name())
+            except Exception as e:
+                log_unique(f"⚠️ Error executing startup command '{bootstrap_cmd}': {e}")
+        asyncio.create_task(_run_bootstrap(), name="bootstrap-cmd")
 
     session = PromptSession()
     # Kick off periodic UI refresh so rprompt reflects current status during idle
