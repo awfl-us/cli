@@ -160,10 +160,12 @@ def _find_yamls_for_class(yaml_gens_dir: Path, cls: str) -> List[Path]:
     return out
 
 
-def deploy_awfl_workflows(generate_only: bool = False) -> bool:
+def deploy_awfl_workflows(generate_only: bool = False, force: bool = False) -> bool:
     """Generate (and optionally deploy) a curated set of AWFL utility workflows by class name.
 
-    This avoids scanning the entire repo and only rebuilds the specified classes.
+    Default behavior now deploys only the files returned in the generator's 'changed' list.
+    No sibling expansion or deletion handling is performed.
+
     When generate_only is True, only generation is performed so YAMLs are included
     in subsequent bulk deploys.
     """
@@ -202,32 +204,62 @@ def deploy_awfl_workflows(generate_only: bool = False) -> bool:
         log_unique("❌ Dev helpers unavailable (gcloud). Cannot deploy core AWFL workflows.")
         return False
 
-    # Resolve YAML paths to deploy for each requested class (may be multiple per class)
-    to_deploy_paths: List[Path] = []
-    for cls in core_classes:
-        matches = _find_yamls_for_class(yaml_gens_dir, cls)
-        if not matches:
-            # Fall back to legacy single-file discovery to be robust if naming changes
-            legacy = _find_yaml_for_class(yaml_gens_dir, cls, changed_paths=changed or [])
-            if legacy and legacy.exists():
-                matches = [legacy]
-        if matches:
-            to_deploy_paths.extend(matches)
-        else:
-            log_unique(f"⚠️ No YAMLs found for {cls} under {yaml_gens_dir}")
+    # Changed-only deploy path: resolve only the files reported by the generator
+    changed_list: List[str] = changed or []
 
-    if not to_deploy_paths:
-        log_unique("⚠️ No YAMLs to deploy. Ensure sbt is installed and generation succeeded.")
-        return False
+    # Resolve to actual file paths under yaml_gens (or absolute if provided)
+    resolved_paths: List[Path] = []
+    for p in changed_list:
+        try:
+            pp = Path(p)
+            if not pp.is_absolute():
+                cand = yaml_gens_dir / p
+                if cand.exists():
+                    pp = cand
+            # If still not found, try matching by basename inside yaml_gens
+            if not pp.exists():
+                cand2 = yaml_gens_dir / Path(p).name
+                if cand2.exists():
+                    pp = cand2
+            if pp.exists():
+                resolved_paths.append(pp)
+            else:
+                log_unique(f"⚠️ Skipping missing YAML from changed list: {p}")
+        except Exception as e:
+            log_unique(f"⚠️ Skipping invalid path from changed list: {p} ({e})")
+
+    if not resolved_paths:
+        if not force:
+            log_unique("ℹ️ No changes detected; skipping deploy of AWFL workflows.")
+            return True
+        # --force fallback: preserve previous behavior by selecting YAMLs per class
+        log_unique("⚠️ No changed files reported; --force set, falling back to class-based selection.")
+        to_deploy_paths: List[Path] = []
+        for cls in core_classes:
+            matches = _find_yamls_for_class(yaml_gens_dir, cls)
+            if not matches:
+                # Fall back to legacy single-file discovery to be robust if naming changes
+                legacy = _find_yaml_for_class(yaml_gens_dir, cls, changed_paths=[])
+                if legacy and legacy.exists():
+                    matches = [legacy]
+            if matches:
+                to_deploy_paths.extend(matches)
+            else:
+                log_unique(f"⚠️ No YAMLs found for {cls} under {yaml_gens_dir}")
+        resolved_paths = to_deploy_paths
 
     # De-duplicate while preserving order
     seen: Set[str] = set()
     unique_paths: List[Path] = []
-    for p in to_deploy_paths:
+    for p in resolved_paths:
         sp = str(p)
         if sp not in seen:
             seen.add(sp)
             unique_paths.append(p)
+
+    if not unique_paths:
+        log_unique("⚠️ Nothing to deploy after resolution.")
+        return True
 
     location, project = resolve_location_project()
 
@@ -239,6 +271,6 @@ def deploy_awfl_workflows(generate_only: bool = False) -> bool:
             ok += 1
 
     log_unique(
-        f"📦 Deploy summary (core AWFL): {ok}/{len(unique_paths)} deployed (project={project}, location={location})."
+        f"📦 Deploy summary (core AWFL, changed-only): {ok}/{len(unique_paths)} deployed (project={project}, location={location})."
     )
     return ok > 0

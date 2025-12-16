@@ -40,7 +40,7 @@ def _default_help() -> bool:
         "  call <workflow> [args...]\n"
         "  stop | cancel | abort\n"
         "  deploy workflows\n"
-        "  deploy awfl workflows\n"
+        "  deploy awfl workflows [--force]\n"
         "  dev <subcommand>  (dev help for details)\n"
     )
     return True
@@ -142,8 +142,10 @@ def handle_command(line: str) -> bool:
         return stop_or_cancel_active()
     if cmd == "deploy workflows":
         return deploy_workflows()
-    if cmd == "deploy awfl workflows":
-        return deploy_awfl_workflows()
+    if cmd.startswith("deploy awfl workflows"):
+        parts = shlex.split(line)
+        force = "--force" in parts[3:]
+        return deploy_awfl_workflows(force=force)
     if cmd.startswith("dev ") or cmd == "dev":
         parts = shlex.split(line)
         return handle_dev_command(parts[1:])
