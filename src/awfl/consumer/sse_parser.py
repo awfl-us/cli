@@ -2,7 +2,7 @@ class SSEParser:
     """Minimal SSE parser for text/event-stream.
 
     Accumulates fields until a blank line, then yields a complete event dict:
-      { 'id': str|None, 'event': str|None, 'data': str }
+      { 'id': str|None, 'event': str|None, 'data': str, 'retry': int|None }
     """
 
     def __init__(self):
@@ -12,6 +12,7 @@ class SSEParser:
         self._id = None
         self._event = None
         self._data_lines = []
+        self._retry = None
 
     def feed_line(self, line: str):
         # Heartbeat/comment lines start with ':'; ignore
@@ -27,6 +28,7 @@ class SSEParser:
                 "id": self._id,
                 "event": self._event or "message",
                 "data": "\n".join(self._data_lines),
+                "retry": self._retry,
             }
             self.reset()
             return evt
@@ -40,6 +42,14 @@ class SSEParser:
             return None
         if line.startswith("event:"):
             self._event = line[6:].lstrip().rstrip("\n\r")
+            return None
+        if line.startswith("retry:"):
+            raw = line[6:].lstrip().rstrip("\n\r")
+            try:
+                self._retry = int(raw)
+            except Exception:
+                # Keep raw value if not an int, could still be useful for logging
+                self._retry = raw or None
             return None
         # Unknown field -> ignore
         return None

@@ -3,6 +3,7 @@ import json
 import os
 import random
 import contextlib
+import traceback
 from typing import Optional, Tuple
 
 import aiohttp
@@ -16,7 +17,7 @@ from .cursors import get_resume_event_id, update_cursor
 from .sse_parser import SSEParser
 from .leader_lock import get_consumer_id, acquire_lock, release_lock
 from .routing import forward_event
-from .debug import dbg, is_debug
+from .debug import dbg, is_debug, is_debug_raw
 
 
 async def _resolve_project_and_workspace(
@@ -71,6 +72,8 @@ async def consume_events_sse(
     )
     if is_debug():
         log_unique("🔎 SSE debug enabled via AWFL_SSE_DEBUG=1")
+    if is_debug_raw():
+        log_unique("🧪 SSE raw payload logging enabled via AWFL_SSE_DEBUG_RAW=1 (use with caution)")
 
     last_ws_id: Optional[str] = None
     last_session_id: Optional[str] = None
@@ -386,34 +389,53 @@ async def consume_events_sse(
                                 evt_id = evt.get("id")
                                 data_text = evt.get("data") or ""
                                 evt_type = evt.get("event") or "message"
+                                evt_retry = evt.get("retry")
 
                                 if not data_text.strip():
                                     # Ignore empty data events (e.g., heartbeat edge cases)
                                     dbg("Empty data event; ignored")
                                     continue
                                 evt_count += 1
+                                preview = data_text if is_debug_raw() else data_text[:160]
                                 dbg(
-                                    f"evt#{evt_count} (type={evt_type}) id={evt_id} data_len={len(data_text)} preview={data_text[:160].replace('\n',' ')}"
+                                    f"evt#{evt_count} (type={evt_type}) id={evt_id} retry={evt_retry} data_len={len(data_text)} preview={preview.replace('\n',' ')}"
                                 )
                                 try:
                                     obj = json.loads(data_text)
                                 except Exception as e:
+                                    p = data_text if is_debug_raw() else data_text[:200]
                                     log_unique(
-                                        f"⚠️ SSE event JSON parse error: {e}. data[0:200]={data_text[:200]}"
+                                        f"⚠️ SSE event JSON parse error (id={evt_id}, type={evt_type}, retry={evt_retry}): {e}. data[0:{len(p)}]=" + p
                                     )
                                     continue
 
                                 # Forward to CLI response handler according to scope
                                 try:
                                     mode = "execute" if scope == "project" else "log"
-                                    await forward_event(obj, mode=mode)  # project executes silently; session logs only
+                                    if isinstance(obj, dict):
+                                        await forward_event(obj, mode=mode)  # project executes silently; session logs only
+                                    else:
+                                        # Non-dict payloads are unexpected; log and skip forwarding to avoid attribute errors downstream
+                                        kind = type(obj).__name__
+                                        rawfrag = data_text if is_debug_raw() else data_text[:400]
+                                        log_unique(
+                                            f"⚠️ SSE event payload is not an object (id={evt_id}, type={evt_type}, retry={evt_retry}, payload_type={kind}); skipping forward. raw[0:{len(rawfrag)}]="
+                                            + rawfrag
+                                        )
                                 except Exception as e:
-                                    log_unique(f"⚠️ Error handling SSE event: {e}")
+                                    rawfrag = data_text if is_debug_raw() else data_text[:400]
+                                    tb = traceback.format_exc()
+                                    log_unique(
+                                        f"⚠️ Error handling SSE event (id={evt_id}, type={evt_type}, retry={evt_retry}, data_len={len(data_text)}): {e}\n{tb}\npreview[0:{len(rawfrag)}]="
+                                        + rawfrag.replace("\n", " ")
+                                    )
 
                                 # Persist new cursor remotely per project/session
                                 if evt_id:
                                     # Prefer server-provided create_time if present; else fall back to local time string
-                                    ts = obj.get("create_time") or obj.get("time")
+                                    ts = None
+                                    if isinstance(obj, dict):
+                                        ts = obj.get("create_time") or obj.get("time")
                                     if ts is None:
                                         try:
                                             # Avoid import at top to keep light; local import

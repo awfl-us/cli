@@ -14,6 +14,7 @@ from .config_cmds import set_exec_mode, set_api_origin, set_skip_auth, set_token
 from .model_cmds import get_or_set_model
 from .deploy_cmds import deploy_workflows, deploy_awfl_workflows
 from .dev import handle_dev_command
+from .files_cmds import upload_files_cmd
 
 
 Handler = Callable[[List[str]], bool]
@@ -41,6 +42,7 @@ def _default_help() -> bool:
         "  stop | cancel | abort\n"
         "  deploy workflows\n"
         "  deploy awfl workflows [--force]\n"
+        "  upload files [--delete]\n"
         "  dev <subcommand>  (dev help for details)\n"
     )
     return True
@@ -146,6 +148,11 @@ def handle_command(line: str) -> bool:
         parts = shlex.split(line)
         force = "--force" in parts[3:]
         return deploy_awfl_workflows(force=force)
+    if cmd.startswith("upload files"):
+        parts = shlex.split(line)
+        # everything after the first two tokens are flags/args for the upload command
+        args = parts[2:] if len(parts) >= 2 else []
+        return upload_files_cmd(args)
     if cmd.startswith("dev ") or cmd == "dev":
         parts = shlex.split(line)
         return handle_dev_command(parts[1:])

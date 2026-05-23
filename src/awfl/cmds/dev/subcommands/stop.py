@@ -10,18 +10,16 @@ from ..core import discover_paths, compose_down, stop_ngrok, compose_status
 from ..core import get_state, set_state, load_dev_config
 
 
-def stop_dev(args: List[str]) -> bool:
-    state = get_state()
-
-    no_ngrok = "--no-ngrok" in args
-    no_compose = "--no-compose" in args
-
-    # Stop Scala watcher task if running
-    task = state.get("watcher_task")
-    if task and not task.done():
-        cancel = getattr(task, "_awfl_cancel", None)
-        if callable(cancel):
+def _cancel_task(task, label: str) -> None:
+    if not task or task.done():
+        return
+    cancel = getattr(task, "_awfl_cancel", None)
+    if callable(cancel):
+        try:
             cancel()
+        except Exception:
+            pass
+    try:
         task.cancel()
         # If we're not inside a running event loop, we can wait for cancellation
         try:
@@ -34,8 +32,23 @@ def stop_dev(args: List[str]) -> bool:
         except RuntimeError:
             # No event loop; nothing further to await
             pass
-        set_state(watcher_task=None)
-        log_unique("🛑 Watcher stopped.")
+    finally:
+        log_unique(f"🛑 {label} stopped.")
+
+
+def stop_dev(args: List[str]) -> bool:
+    state = get_state()
+
+    no_ngrok = "--no-ngrok" in args
+    no_compose = "--no-compose" in args
+
+    # Stop Scala/YAML watcher task if running
+    _cancel_task(state.get("watcher_task"), "Watcher")
+    set_state(watcher_task=None)
+
+    # Stop files watcher task if running
+    _cancel_task(state.get("scripts_watcher_task"), "Files watcher")
+    set_state(scripts_watcher_task=None)
 
     # Bring down docker compose (replicate dev.sh behavior: always down if compose file exists)
     cfg: Dict[str, Any] = load_dev_config() or {}

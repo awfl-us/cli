@@ -21,6 +21,7 @@ from ..core import (
     _short_display,
     _env_suffix,
     watch_workflows,
+    watch_scripts,
     get_state,
     set_state,
     load_dev_config,
@@ -258,6 +259,9 @@ def start_dev(args: List[str]) -> bool:
     if use_watch:
         task = watch_workflows(paths, auto_deploy=auto_deploy)
         set_state(watcher_task=task)
+        # Also watch files directory and sync to GCS
+        s_task = watch_scripts(paths, project=project)
+        set_state(scripts_watcher_task=s_task)
 
     # Register clean shutdown hooks so Ctrl-C or process exit mirrors dev.sh teardown
     _register_shutdown_hooks()
@@ -268,6 +272,13 @@ def start_dev(args: List[str]) -> bool:
     # Re-fetch fresh state to reflect watcher_task set above
     cur_state = get_state()
     watch = "running" if cur_state.get("watcher_task") and not cur_state.get("watcher_task").done() else "stopped"
+    swatch = "running" if cur_state.get("scripts_watcher_task") and not cur_state.get("scripts_watcher_task").done() else "stopped"
+
+    # Compute files bucket display
+    if project and str(project).strip():
+        files_bucket = f"{project}-workflow-files{_env_suffix().lower()}"
+    else:
+        files_bucket = f"workflow-files{_env_suffix()} (legacy, PROJECT not set)"
 
     log_unique(
         "Dev started with:\n"
@@ -277,6 +288,7 @@ def start_dev(args: List[str]) -> bool:
         f"- ngrok: {tunnel or 'not started'} (port {port})\n"
         f"- compose: {paths.compose_file or 'none'} ({comp})\n"
         f"- watcher: {watch} (auto-deploy={'on' if auto_deploy else 'off'})\n"
+        f"- files watcher: {swatch} -> bucket {files_bucket}\n"
         f"- deploy target: {project}/{location} (suffix {_env_suffix()})"
     )
     return True

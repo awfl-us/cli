@@ -24,6 +24,7 @@ from .yaml_ops import (
     deploy_workflow,
 )
 from .watcher import watch_workflows
+from .scripts_watcher import watch_scripts
 
 __all__ = [
     # paths
@@ -55,4 +56,5 @@ __all__ = [
     "deploy_workflow",
     # watcher
     "watch_workflows",
+    "watch_scripts",
 ]

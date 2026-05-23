@@ -5,6 +5,7 @@ from typing import Dict
 # Ephemeral session state for dev commands
 _state: Dict[str, object] = {
     "watcher_task": None,
+    "scripts_watcher_task": None,
     "ngrok_proc": None,
     "compose_started_here": False,
     "last_yaml_snapshot": {},
