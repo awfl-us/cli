@@ -51,7 +51,9 @@ def print_status() -> None:
     origin = os.getenv('API_ORIGIN') or 'http://localhost:5050'
     skip = os.getenv('SKIP_AUTH') == '1'
     has_override = bool(os.getenv('FIREBASE_ID_TOKEN'))
+    proj = os.getenv('AWFL_PROJECT_ID') or '(auto)'
+    ctype = os.getenv('AWFL_CONSUMER_TYPE') or 'LOCAL'
     # wf_dir = resolve_workflows_dir()
-    log_unique(f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'}")
+    log_unique(f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'} | AWFL_PROJECT_ID={proj} | AWFL_CONSUMER_TYPE={ctype}")
     if mode == 'api':
         print_whoami()

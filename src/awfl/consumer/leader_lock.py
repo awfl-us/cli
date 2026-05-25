@@ -47,6 +47,19 @@ def get_consumer_id() -> str:
     return _consumer_id
 
 
+def get_consumer_type() -> str:
+    """Resolve the consumer type for headers/body.
+
+    Env override: AWFL_CONSUMER_TYPE (e.g., CLOUD or LOCAL); defaults to LOCAL.
+    """
+    val = os.getenv("AWFL_CONSUMER_TYPE")
+    if isinstance(val, str):
+        v = val.strip().upper()
+        if v:
+            return v
+    return "LOCAL"
+
+
 async def acquire_lock(
     session_http: aiohttp.ClientSession,
     *,
@@ -65,6 +78,7 @@ async def acquire_lock(
     """
     url = f"{get_api_origin()}/workflows/projects/{project_id}/consumer-lock/acquire"
     cid = consumer_id or get_consumer_id()
+    ctype = get_consumer_type()
     headers = {
         "Content-Type": "application/json",
     }
@@ -80,7 +94,7 @@ async def acquire_lock(
     if lease_ms and lease_ms > 0:
         headers["x-lock-lease-ms"] = str(int(lease_ms))
     # Convey consumer type via header as well (server accepts either header or body)
-    headers["x-consumer-type"] = "LOCAL"
+    headers["x-consumer-type"] = ctype
 
     body: Dict[str, Any] = {}
     if cid:
@@ -88,7 +102,7 @@ async def acquire_lock(
     if lease_ms and lease_ms > 0:
         body["leaseMs"] = int(lease_ms)
 
-    body["consumerType"] = "LOCAL"
+    body["consumerType"] = ctype
 
     try:
         async with session_http.post(url, json=body, headers=headers) as resp:
@@ -133,6 +147,7 @@ async def release_lock(
     """
     url = f"{get_api_origin()}/workflows/projects/{project_id}/consumer-lock/release"
     cid = consumer_id or get_consumer_id()
+    ctype = get_consumer_type()
 
     headers = {
         "Content-Type": "application/json",
@@ -146,7 +161,7 @@ async def release_lock(
         headers["x-consumer-id"] = cid
     if force:
         headers["x-lock-force"] = "1"
-    headers["x-consumer-type"] = "LOCAL"
+    headers["x-consumer-type"] = ctype
 
     body: Dict[str, Any] = {}
     if cid:
@@ -154,7 +169,7 @@ async def release_lock(
     if force:
         body["force"] = True
 
-    body["consumerType"] = "LOCAL"
+    body["consumerType"] = ctype
 
     try:
         async with session_http.post(url, json=body, headers=headers) as resp:

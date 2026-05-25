@@ -34,7 +34,7 @@ class TestSanitizeShellCommand(unittest.TestCase):
         cmds = [
             "echo 'ok'",
             'echo "ok"',
-            "bash -lc 'echo "ok"'",
+            'bash -lc \'echo "ok"\'',
             "sed -n '1,10p' ./file.txt",
         ]
         for cmd in cmds:

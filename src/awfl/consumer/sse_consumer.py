@@ -15,7 +15,7 @@ from awfl.events.workspace import resolve_project_id, get_or_create_workspace
 
 from .cursors import get_resume_event_id, update_cursor
 from .sse_parser import SSEParser
-from .leader_lock import get_consumer_id, acquire_lock, release_lock
+from .leader_lock import get_consumer_id, acquire_lock, release_lock, get_consumer_type
 from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
 
@@ -285,6 +285,13 @@ async def consume_events_sse(
             except Exception as e:
                 log_unique(f"⚠️ Could not resolve auth headers for SSE: {e}")
 
+            # Advertise consumer type so server can differentiate LOCAL vs CLOUD consumers
+            try:
+                headers["x-consumer-type"] = get_consumer_type()
+            except Exception:
+                # Best-effort; default behavior on server is LOCAL if header missing
+                pass
+
             # Attach Last-Event-ID cursor if available for this workspace and scope
             try:
                 if scope == "session":
@@ -397,8 +404,10 @@ async def consume_events_sse(
                                     continue
                                 evt_count += 1
                                 preview = data_text if is_debug_raw() else data_text[:160]
+                                # Precompute sanitized preview to avoid backslashes inside f-string expressions (Py<=3.11)
+                                preview_one_line = preview.replace("\n", " ")
                                 dbg(
-                                    f"evt#{evt_count} (type={evt_type}) id={evt_id} retry={evt_retry} data_len={len(data_text)} preview={preview.replace('\n',' ')}"
+                                    f"evt#{evt_count} (type={evt_type}) id={evt_id} retry={evt_retry} data_len={len(data_text)} preview={preview_one_line}"
                                 )
                                 try:
                                     obj = json.loads(data_text)

@@ -153,7 +153,6 @@ def _firebase_refresh(refresh_token: str) -> Tuple[str, str, int]:
 
 def _firebase_sign_in_with_google_id_token(google_id_token: str) -> Dict[str, Any]:
     api_key = _get_firebase_api_key()
-    print(f"API Key: {api_key}")
     if not api_key:
         raise RuntimeError("FIREBASE_API_KEY not set; cannot exchange Google ID token with Firebase.")
     payload = {
@@ -398,10 +397,17 @@ def get_auth_headers() -> Dict[str, str]:
     - Else ensure a Firebase user session via Google Device Flow and refresh as needed
     Scopes token storage by the per-repo dev config GCP project, defaulting to 'awfl-us'.
     Note: Firebase and Google OAuth credentials are resolved dynamically (env > dev_config > defaults).
+
+    Also supports overriding the AWFL server project id via AWFL_PROJECT_ID env var.
+    When set, x-project-id will be sent with that value (otherwise uses set_project_id if provided).
     """
     headers: Dict[str, str] = {}
 
-    if _project_id:
+    # Prefer runtime override via env; fall back to value set by set_project_id()
+    proj_override = os.getenv("AWFL_PROJECT_ID")
+    if proj_override and proj_override.strip():
+        headers["x-project-id"] = proj_override.strip()
+    elif _project_id:
         headers["x-project-id"] = _project_id
 
     override = os.getenv("FIREBASE_ID_TOKEN")
