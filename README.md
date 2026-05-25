@@ -144,6 +144,18 @@ awfl set api_origin https://your-server.example.com
     - set api_origin http://localhost:5050 sets the base URL. status shows the current value.
   - Model
     - model gpt-5 sets the LLM model that the CLI injects into workflow payloads.
+  - Workspace project override (AWFL_PROJECT_ID)
+    - Set AWFL_PROJECT_ID to force the workspace project without relying on git discovery.
+    - Useful outside a git repo or when the git origin is missing.
+    - Example:
+      ```
+      export AWFL_PROJECT_ID=my-project-id
+      export SKIP_AUTH=1  # optional for trusted local development
+      awfl
+      ```
+    - Expected startup log:
+      - "Using AWFL_PROJECT_ID=my-project-id; skipping git discovery"
+    - The SSE stream should connect for both project and session scopes. Verify with the status command, which echoes AWFL_PROJECT_ID.
 
 - Authentication
   - The CLI uses Google Device Login followed by Firebase sign‑in. Tokens are cached under ~/.awfl.

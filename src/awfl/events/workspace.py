@@ -194,6 +194,10 @@ async def create_project(
 
 
 def repo_remote():
+    # When an explicit project override is provided, skip git-related diagnostics entirely
+    if os.getenv("AWFL_PROJECT_ID"):
+        return None
+
     root = _detect_git_root()
     if not root:
         log_unique("ℹ️ Not in a git repo; cannot resolve project for workspace.")
@@ -211,13 +215,22 @@ async def resolve_project_id(
     *,
     create_if_missing: bool = True,
 ) -> Optional[str]:
-    """Resolve the project id for the current git repo.
+    """Resolve the project id for the current git repo or honor AWFL_PROJECT_ID override.
 
-    - Checks a local cache (by derived name org/repo) to avoid races/consistency gaps.
+    - If AWFL_PROJECT_ID is set: early-return that value, skip git discovery and related logs.
+    - Else: Checks a local cache (by derived name org/repo) to avoid races/consistency gaps.
     - Lists existing projects and matches by normalized remote.
     - If create_if_missing is True, creates a new project with name derived from org/repo.
     - Returns the project id or None if not found/created.
     """
+    # 0) Environment override takes precedence
+    override = os.getenv("AWFL_PROJECT_ID")
+    if override and override.strip():
+        pid = override.strip()
+        set_project_id(pid)
+        log_unique(f"ℹ️ Using AWFL_PROJECT_ID={pid}; skipping git discovery")
+        return pid
+
     norm = repo_remote()
 
     if not norm:
