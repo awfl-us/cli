@@ -15,7 +15,13 @@ from awfl.events.workspace import resolve_project_id, get_or_create_workspace
 
 from .cursors import get_resume_event_id, update_cursor
 from .sse_parser import SSEParser
-from .leader_lock import get_consumer_id, acquire_lock, release_lock, get_consumer_type
+from .leader_lock import (
+    get_consumer_id,
+    acquire_lock,
+    release_lock,
+    get_consumer_type,
+    get_external_lock_token,
+)
 from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
 
@@ -115,6 +121,22 @@ async def consume_events_sse(
     lease_secs = lease_ms / 1000.0
     refresh_interval_secs = min(refresh_interval_secs, max(1.0, lease_secs - 5.0))
 
+    # External lock hints and behavior toggles
+    external_lock_token = (get_external_lock_token() or "").strip()
+    no_refresh = False
+    try:
+        no_refresh = (
+            os.getenv("AWFL_PROJECT_LOCK_NO_REFRESH") == "1"
+            or os.getenv("AWFL_LOCK_NO_REFRESH") == "1"
+        )
+    except Exception:
+        no_refresh = False
+
+    if scope == "project" and external_lock_token:
+        log_unique("🔏 External project lock token detected (AWFL_PROJECT_LOCK_TOKEN). Will use it on acquire/refresh.")
+        if no_refresh:
+            log_unique("⛔ External lock marked non-renewable (AWFL_PROJECT_LOCK_NO_REFRESH=1); local refresher will be disabled.")
+
     async with aiohttp.ClientSession(timeout=client_timeout) as session_http:
         project_id_for_lock: Optional[str] = None
         leader_acquired = False
@@ -165,19 +187,23 @@ async def consume_events_sse(
                 if acquired or refreshed:
                     leader_acquired = True
                     cid = get_consumer_id()
+                    used_ext = bool(external_lock_token)
                     if acquired:
                         log_unique(
-                            f"🔐 Acquired project consumer lock for {project_id} as {cid} (lease={lease_ms}ms)"
+                            f"🔐 Acquired project consumer lock for {project_id} as {cid} (lease={lease_ms}ms){' via external token' if used_ext else ''}"
                         )
                     else:
                         log_unique(
-                            f"🔄 Refreshed project consumer lock for {project_id} as {cid} (lease={lease_ms}ms)"
+                            f"🔄 Refreshed project consumer lock for {project_id} as {cid} (lease={lease_ms}ms){' via external token' if used_ext else ''}"
                         )
-                    # Start refresher if not already running
-                    if not refresher_task or refresher_task.done():
-                        refresher_task = asyncio.create_task(
-                            _lease_refresher(project_id), name="awfl-lock-refresher"
-                        )
+                    # Start refresher if allowed and not already running
+                    if not no_refresh:
+                        if not refresher_task or refresher_task.done():
+                            refresher_task = asyncio.create_task(
+                                _lease_refresher(project_id), name="awfl-lock-refresher"
+                            )
+                    else:
+                        dbg("External lock marked non-renewable; skipping local refresher task")
                     return None
                 # Unknown/other response; backoff and retry a few times, then keep trying with capped backoff
                 delay = min(5.0, 0.5 * attempt) + random.random()

@@ -60,6 +60,34 @@ def get_consumer_type() -> str:
     return "LOCAL"
 
 
+# ----- External pre-acquired lock hints (from orchestrator) -----
+
+def get_external_lock_token() -> Optional[str]:
+    """Return a pre-acquired lock token if provided via env.
+    Supported env vars (first non-empty wins):
+    - AWFL_PROJECT_LOCK_TOKEN
+    - AWFL_LOCK_TOKEN (alias)
+    """
+    v = os.getenv("AWFL_PROJECT_LOCK_TOKEN") or os.getenv("AWFL_LOCK_TOKEN")
+    if isinstance(v, str):
+        v = v.strip()
+        return v or None
+    return None
+
+
+def get_external_lock_id() -> Optional[str]:
+    """Return a pre-acquired lock id if provided via env.
+    Supported env vars (first non-empty wins):
+    - AWFL_PROJECT_LOCK_ID
+    - AWFL_LOCK_ID (alias)
+    """
+    v = os.getenv("AWFL_PROJECT_LOCK_ID") or os.getenv("AWFL_LOCK_ID")
+    if isinstance(v, str):
+        v = v.strip()
+        return v or None
+    return None
+
+
 async def acquire_lock(
     session_http: aiohttp.ClientSession,
     *,
@@ -79,7 +107,7 @@ async def acquire_lock(
     url = f"{get_api_origin()}/workflows/projects/{project_id}/consumer-lock/acquire"
     cid = consumer_id or get_consumer_id()
     ctype = get_consumer_type()
-    headers = {
+    headers: Dict[str, str] = {
         "Content-Type": "application/json",
     }
     # Add auth headers (best-effort)
@@ -96,6 +124,14 @@ async def acquire_lock(
     # Convey consumer type via header as well (server accepts either header or body)
     headers["x-consumer-type"] = ctype
 
+    # External pre-acquired lock hints
+    ext_token = get_external_lock_token()
+    ext_id = get_external_lock_id()
+    if ext_token:
+        headers["x-lock-token"] = ext_token
+    if ext_id:
+        headers["x-lock-id"] = ext_id
+
     body: Dict[str, Any] = {}
     if cid:
         body["consumerId"] = cid
@@ -103,6 +139,12 @@ async def acquire_lock(
         body["leaseMs"] = int(lease_ms)
 
     body["consumerType"] = ctype
+
+    # Include external lock hints in body too for maximum compatibility
+    if ext_token:
+        body["lockToken"] = ext_token
+    if ext_id:
+        body["lockId"] = ext_id
 
     try:
         async with session_http.post(url, json=body, headers=headers) as resp:
@@ -149,7 +191,7 @@ async def release_lock(
     cid = consumer_id or get_consumer_id()
     ctype = get_consumer_type()
 
-    headers = {
+    headers: Dict[str, str] = {
         "Content-Type": "application/json",
     }
     try:
@@ -163,6 +205,14 @@ async def release_lock(
         headers["x-lock-force"] = "1"
     headers["x-consumer-type"] = ctype
 
+    # External pre-acquired lock hints
+    ext_token = get_external_lock_token()
+    ext_id = get_external_lock_id()
+    if ext_token:
+        headers["x-lock-token"] = ext_token
+    if ext_id:
+        headers["x-lock-id"] = ext_id
+
     body: Dict[str, Any] = {}
     if cid:
         body["consumerId"] = cid
@@ -170,6 +220,11 @@ async def release_lock(
         body["force"] = True
 
     body["consumerType"] = ctype
+
+    if ext_token:
+        body["lockToken"] = ext_token
+    if ext_id:
+        body["lockId"] = ext_id
 
     try:
         async with session_http.post(url, json=body, headers=headers) as resp:
