@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from awfl.utils import log_unique
-from awfl.auth import ensure_active_account
+from awfl.auth import ensure_active_account, get_auth_headers
 
 from ..core import (
     DevPaths,
@@ -210,11 +210,17 @@ def start_dev(args: List[str]) -> bool:
 
     # Ensure the user is authenticated for the selected project before starting services
     selected_project = project or None
-    log_unique(
-        f"Checking authentication for project {selected_project or '(default)'} … you may be prompted to log in."
-    )
     try:
-        ensure_active_account(selected_project, prompt_login=True)
+        # Prefer env-based or cached auth (including FIREBASE_CUSTOM_TOKEN/FIREBASE_ID_TOKEN/SKIP_AUTH)
+        headers = get_auth_headers()
+        if "Authorization" in headers or headers.get("X-Skip-Auth") == "1":
+            log_unique("Auth detected from environment/cache; skipping interactive Google login.")
+        else:
+            # Fall back to interactive Device Flow only when no env-based auth was found
+            log_unique(
+                f"Checking authentication for project {selected_project or '(default)'} … you may be prompted to log in."
+            )
+            ensure_active_account(selected_project, prompt_login=True)
     except Exception as e:
         log_unique(f"❌ Authentication check failed: {e}")
         return False

@@ -19,6 +19,7 @@ DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 FIREBASE_IDP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp"
 FIREBASE_REFRESH_URL = "https://securetoken.googleapis.com/v1/token"
+FIREBASE_CUSTOM_TOKEN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken"
 
 SCOPES = "openid email profile"
 
@@ -172,6 +173,25 @@ def _firebase_sign_in_with_google_id_token(google_id_token: str) -> Dict[str, An
     return r.json()
 
 
+def _firebase_sign_in_with_custom_token(custom_token: str) -> Dict[str, Any]:
+    api_key = _get_firebase_api_key()
+    if not api_key:
+        raise RuntimeError("FIREBASE_API_KEY not set; cannot exchange Firebase custom token.")
+    payload = {
+        "token": custom_token,
+        "returnSecureToken": True,
+    }
+    r = requests.post(
+        f"{FIREBASE_CUSTOM_TOKEN_URL}?key={api_key}",
+        json=payload,
+        timeout=30,
+    )
+    if not r.ok:
+        print("🚨 Firebase custom-token sign-in failed:", r.status_code, r.text)
+    r.raise_for_status()
+    return r.json()
+
+
 def _google_device_flow() -> str:
     client_id = _get_google_oauth_client_id()
     client_secret = _get_google_oauth_client_secret()
@@ -299,6 +319,34 @@ def login_google_device(gcp_project: Optional[str] = None) -> Dict[str, Any]:
     return bucket["accounts"][key]
 
 
+def login_firebase_custom_token(custom_token: str, gcp_project: Optional[str] = None) -> Dict[str, Any]:
+    """Exchange a Firebase Custom Token for an ID token and persist it for the project."""
+    project = gcp_project or _resolve_gcp_project()
+    fb = _firebase_sign_in_with_custom_token(custom_token)
+
+    id_token = fb["idToken"]
+    refresh_token = fb.get("refreshToken")
+    expires_at = _now() + int(fb.get("expiresIn", 3600)) - 60
+    local_id = fb.get("localId") or ""
+    email = fb.get("email")
+
+    cache = _load_cache()
+    bucket = _project_bucket(cache, project)
+    key = f"custom:{email}" if email else f"custom:{local_id}"
+    bucket["accounts"][key] = {
+        "provider": "custom",
+        "firebaseUid": local_id,
+        "email": email,
+        "idToken": id_token,
+        "refreshToken": refresh_token,
+        "expiresAt": expires_at,
+    }
+    bucket["activeUserKey"] = key
+
+    _save_cache(cache)
+    return bucket["accounts"][key]
+
+
 def _get_active_account_for_project(cache: Dict[str, Any], gcp_project: str) -> Optional[Dict[str, Any]]:
     bucket = _project_bucket(cache, gcp_project)
     key = bucket.get("activeUserKey")
@@ -334,7 +382,7 @@ def _refresh_if_needed(acct: Dict[str, Any], gcp_project: Optional[str] = None) 
     id_token, refresh_token, expires_at = _firebase_refresh(acct.get("refreshToken"))
     acct.update({
         "idToken": id_token,
-        "RefreshToken": refresh_token or acct.get("refreshToken"),
+        "refreshToken": refresh_token or acct.get("refreshToken"),
         "expiresAt": expires_at,
     })
     # Persist update within the appropriate project bucket if possible
@@ -394,6 +442,7 @@ def get_auth_headers() -> Dict[str, str]:
     Resolve auth headers for API calls.
     - If SKIP_AUTH=1: return { 'X-Skip-Auth': '1' }
     - If FIREBASE_ID_TOKEN is set: use it
+    - Else if FIREBASE_CUSTOM_TOKEN is set: exchange it for an ID token, cache, and use it (with refresh on subsequent calls)
     - Else ensure a Firebase user session via Google Device Flow and refresh as needed
     Scopes token storage by the per-repo dev config GCP project, defaulting to 'awfl-us'.
     Note: Firebase and Google OAuth credentials are resolved dynamically (env > dev_config > defaults).
@@ -420,8 +469,24 @@ def get_auth_headers() -> Dict[str, str]:
 
     else:
         gcp_project = _resolve_gcp_project()
-        acct = ensure_active_account(gcp_project)
-        acct = _refresh_if_needed(acct, gcp_project)
-        headers["Authorization"] = f"Bearer {acct['idToken']}"
+        custom = os.getenv("FIREBASE_CUSTOM_TOKEN")
+        if custom:
+            # Prefer an existing custom-token-based account for this project, else exchange and store
+            cache = _load_cache()
+            bucket = _project_bucket(cache, gcp_project)
+            acct: Optional[Dict[str, Any]] = None
+            for v in bucket.get("accounts", {}).values():
+                if v.get("provider") == "custom":
+                    acct = v
+                    break
+            if acct:
+                acct = _refresh_if_needed(acct, gcp_project)
+            else:
+                acct = login_firebase_custom_token(custom, gcp_project)
+            headers["Authorization"] = f"Bearer {acct['idToken']}"
+        else:
+            acct = ensure_active_account(gcp_project)
+            acct = _refresh_if_needed(acct, gcp_project)
+            headers["Authorization"] = f"Bearer {acct['idToken']}"
 
     return headers

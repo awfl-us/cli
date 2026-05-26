@@ -180,6 +180,20 @@ def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.E
     task.add_done_callback(_cb)
 
 
+def _should_prompt_login() -> bool:
+    """Return True if we should trigger interactive Google login on startup.
+    Respect env-based auth overrides to avoid prompting when FIREBASE_CUSTOM_TOKEN or
+    FIREBASE_ID_TOKEN (or SKIP_AUTH) are set.
+    """
+    if os.getenv("SKIP_AUTH") == "1":
+        return False
+    if os.getenv("FIREBASE_ID_TOKEN"):
+        return False
+    if os.getenv("FIREBASE_CUSTOM_TOKEN"):
+        return False
+    return True
+
+
 async def main():
     # Initialize session to the full selected workflow name (with env suffix)
     initial_session = _compute_session_workflow_name()
@@ -195,7 +209,9 @@ async def main():
             # add_signal_handler not supported (e.g., on Windows); rely on finally
             pass
 
-    ensure_active_account(prompt_login=True)
+    # Only prompt for Google Device Flow if no env-based auth is configured
+    if _should_prompt_login():
+        ensure_active_account(prompt_login=True)
 
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     consumer_shutdown_evt = asyncio.Event()
