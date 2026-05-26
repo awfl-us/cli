@@ -19,6 +19,26 @@ def _is_debug() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _use_plain_print() -> bool:
+    """Decide whether to avoid prompt_toolkit printing.
+    Use plain print when:
+    - Explicit headless mode is enabled (AWFL_NO_REPL=1), or
+    - TERM is missing/empty, or
+    - stdout is not a TTY (e.g., container logs, CI), or
+    - prompt_toolkit would likely fail to initialize gracefully.
+    """
+    if os.getenv("AWFL_NO_REPL") == "1":
+        return True
+    term = os.getenv("TERM", "").strip()
+    try:
+        is_tty = bool(sys.stdout.isatty())
+    except Exception:
+        is_tty = False
+    if not term or not is_tty:
+        return True
+    return False
+
+
 def log_unique(text):
     global _last_hash
     # Ensure string and make it safe for hashing/printing even with surrogate code points
@@ -34,7 +54,10 @@ def log_unique(text):
         _last_hash = h
 
         try:
-            print_formatted_text(safe_text + "\n")
+            if _use_plain_print():
+                print(safe_text + "\n", flush=True)
+            else:
+                print_formatted_text(safe_text + "\n")
         except Exception:
             try:
                 print(safe_text + "\n", flush=True)

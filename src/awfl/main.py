@@ -58,6 +58,33 @@ def _argv_all() -> list[str]:
     return sys.argv[1:]
 
 
+def _process_run_alias_from_argv() -> None:
+    """Recognize 'run'|'headless'|'remote' as a pre-parsed long-running alias.
+    Sets AWFL_NO_REPL=1 and optionally stores a bootstrap command (remaining args)
+    then clears argv so normal startup-cmd routing is skipped.
+    """
+    pos = _argv_positionals()
+    if not pos:
+        return
+    first = pos[0].lower()
+    if first in ("run", "headless", "remote"):
+        os.environ["AWFL_NO_REPL"] = "1"
+        # If there are tokens after the alias, treat them as a bootstrap command
+        try:
+            # Find index of the first positional in the real argv to preserve flags ordering if ever needed
+            first_index = next(i for i, a in enumerate(sys.argv[1:], start=1) if a and not a.startswith('-'))
+        except StopIteration:
+            first_index = 1
+        remainder = sys.argv[first_index + 1 :]
+        if remainder:
+            try:
+                os.environ["AWFL_BOOTSTRAP_CMD"] = shlex.join(remainder)
+            except Exception:
+                os.environ["AWFL_BOOTSTRAP_CMD"] = " ".join(remainder)
+        # Clear argv so downstream parsing doesn't re-handle these tokens
+        sys.argv = [sys.argv[0]]
+
+
 def _init_env_mode_from_argv():
     # Detect "awfl dev" (or python cli/main.py dev). Default is prod (no suffix)
     args = _argv_positionals()
@@ -96,6 +123,7 @@ def _startup_command_from_argv() -> str | None:
     - No args -> None (enter interactive)
     - ['dev'] -> None (enter interactive in Dev mode)
     - Anything else -> join all args and run via handle_command
+    Note: run/headless/remote aliases are pre-processed and removed from argv before this runs.
     """
     all_args = _argv_all()
     if not all_args:
@@ -194,6 +222,17 @@ def _should_prompt_login() -> bool:
     return True
 
 
+def _is_headless() -> bool:
+    if os.getenv("AWFL_NO_REPL") == "1":
+        return True
+    term = os.getenv("TERM", "").strip()
+    try:
+        is_tty = bool(sys.stdout.isatty())
+    except Exception:
+        is_tty = False
+    return (not term) or (not is_tty)
+
+
 async def main():
     # Initialize session to the full selected workflow name (with env suffix)
     initial_session = _compute_session_workflow_name()
@@ -227,8 +266,6 @@ async def main():
     if bootstrap_cmd:
         async def _run_bootstrap():
             try:
-                # Run directly in the event loop thread to avoid 'coroutine was never awaited'
-                # when watch_workflows() creates tasks.
                 handle_command(bootstrap_cmd)
                 # Keep session aligned after potential workflow changes
                 set_session(_compute_session_workflow_name())
@@ -236,6 +273,30 @@ async def main():
                 log_unique(f"⚠️ Error executing startup command '{bootstrap_cmd}': {e}")
         asyncio.create_task(_run_bootstrap(), name="bootstrap-cmd")
 
+    # Headless mode: no interactive REPL; just run the SSE consumers and wait
+    if _is_headless():
+        log_unique("🧪 Running in headless mode (no REPL): SSE consumers active.")
+        try:
+            await consumer_shutdown_evt.wait()
+            log_unique("❌ Event stream consumer stopped. Exiting CLI so your supervisor can restart it.")
+            # Best-effort cancel the other consumer (if still running)
+            for t in (project_consumer, session_consumer):
+                if not t.done():
+                    t.cancel()
+            await asyncio.sleep(0.05)
+            sys.exit(2)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            for t in (project_consumer, session_consumer):
+                if t and not t.done():
+                    t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    if t:
+                        await t
+        return
+
+    # Interactive REPL path
     session = PromptSession()
     # Kick off periodic UI refresh so rprompt reflects current status during idle
     refresh_task = asyncio.create_task(_refresh_prompt_task(session), name="refresh-rprompt")
@@ -319,6 +380,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Recognize 'run'/'headless'/'remote' aliases before any other parsing
+    _process_run_alias_from_argv()
+
     _init_env_mode_from_argv()
     # If a startup command was provided (e.g., "awfl dev start" or "awfl help"),
     # run it non-interactively and either keep the CLI open (for long-running dev commands)
