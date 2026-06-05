@@ -152,3 +152,6 @@ Quick start
 - python cli/main.py
 - In the prompt, use workflows to select an assistant, then type queries or use call <workflow>.
 - For local development: dev start, touch Scala files, dev status, dev stop.
+
+Change log
+- 2026-05-27: call <workflow> no longer mutates AWFL_SESSION_ID. Instead, it tags the payload with sessionId and sets background: true so results are processed without changing the SSE session. Log example: "➡ call <wf>: background execution; tagged sessionId=<uuid> (SSE session unchanged)".

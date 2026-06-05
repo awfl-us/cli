@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import uuid
 import shlex
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Any
 
 from awfl.utils import log_unique
-from awfl.state import set_active_workflow
 from awfl.utils import trigger_workflow
 
 from .workflows import ls_workflows_interactive
@@ -48,14 +48,77 @@ def _default_help() -> bool:
     return True
 
 
+def _coerce_primitive(val: str) -> Any:
+    s = val.strip()
+    low = s.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    if low in ("null", "none"):
+        return None
+    # Try int, then float
+    try:
+        # Avoid interpreting hex or octal prefixed strings; int() handles plain decimals by default
+        if s and (s.isdigit() or (s[0] in "+-" and s[1:].isdigit())):
+            return int(s)
+    except Exception:
+        pass
+    try:
+        # Allow simple floats, including scientific notation
+        return float(s)
+    except Exception:
+        pass
+    return s
+
+
 def _handle_call(args: List[str]) -> bool:
     if not args:
-        log_unique("Usage: call <workflow> [args...]")
+        log_unique("Usage: call <workflow> [args...]  (positional -> arg1..n; key=value supported)")
         return True
     wf = args[0]
     data_args = args[1:]
-    set_active_workflow(wf)
-    payload = {"text": " ".join(data_args)} if data_args else {}
+
+    # Use a one-off ephemeral tag for this call without changing SSE session filtering
+    sid = str(uuid.uuid4())
+
+    positional: List[Any] = []
+    named: Dict[str, Any] = {}
+
+    for tok in data_args:
+        if "=" in tok:
+            key, value = tok.split("=", 1)
+            k = key.strip()
+            if not k:
+                # Treat malformed =value tokens as positional
+                positional.append(_coerce_primitive(value))
+                continue
+            named[k] = _coerce_primitive(value)
+        else:
+            positional.append(_coerce_primitive(tok))
+
+    payload: Dict[str, Any] = {}
+    if data_args:
+        payload["text"] = " ".join(data_args)
+
+    # Map positional args -> arg1, arg2, ...
+    for i, v in enumerate(positional, start=1):
+        payload[f"arg{i}"] = v
+
+    # Include named key=value pairs directly
+    payload.update(named)
+
+    payload["sessionId"] = sid
+    payload["background"] = True
+
+    # Concise parse summary
+    pos_cnt = len(positional)
+    named_keys = ", ".join(named.keys()) if named else "none"
+    pos_suffix = f" (arg1..arg{pos_cnt})" if pos_cnt else ""
+    log_unique(
+        f"➡ call {wf}: background execution; tagged sessionId={sid} (SSE session unchanged); parsed {pos_cnt} positional{pos_suffix} and {len(named)} named keys [{named_keys}]"
+    )
+
     trigger_workflow(wf, payload)
     return True
 

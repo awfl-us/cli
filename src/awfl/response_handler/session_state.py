@@ -24,10 +24,16 @@ def set_session(new_session_id: Optional[str]) -> None:
 def get_session() -> str:
     """Resolve the current session identifier.
     Resolution order:
-      1) ASSISTANT_WORKFLOW env (normalized)
-      2) Selected active workflow (normalized)
-      3) Locally tracked _session_id
+      1) AWFL_SESSION_ID env (one-off/ephemeral override)
+      2) ASSISTANT_WORKFLOW env (normalized)
+      3) Selected active workflow (normalized)
+      4) Locally tracked _session_id
     """
+    # Highest precedence: explicit ephemeral/session override
+    env_sid = os.environ.get("AWFL_SESSION_ID")
+    if env_sid:
+        return env_sid
+
     env_wf = os.environ.get("ASSISTANT_WORKFLOW")
     if env_wf:
         return normalize_workflow(env_wf)
