@@ -2,5 +2,8 @@
   "files": [
     "AGENT.md"
   ],
-  "commands": []
+  "commands": [
+    "pwd",
+    "ls -la src/awfl"
+  ]
 }

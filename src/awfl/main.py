@@ -3,9 +3,9 @@ import sys
 import asyncio
 import signal
 import contextlib
+import shlex
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.patch_stdout import patch_stdout
-import shlex
 
 import awfl.utils as wf_utils
 from awfl.auth import ensure_active_account
@@ -14,6 +14,7 @@ from awfl.utils import log_lines, log_unique, trigger_workflow
 from awfl.commands import handle_command
 from awfl.consumer import consume_events_sse
 from awfl.state import set_workflow_env_suffix, get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
+from awfl.onboarding.git import first_run_git_onboarding
 
 
 def _compute_session_workflow_name() -> str:
@@ -251,6 +252,9 @@ async def main():
     # Only prompt for Google Device Flow if no env-based auth is configured
     if _should_prompt_login():
         ensure_active_account(prompt_login=True)
+
+    # Run first-run git onboarding before starting SSE consumers so prompts render cleanly
+    first_run_git_onboarding()
 
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     consumer_shutdown_evt = asyncio.Event()
