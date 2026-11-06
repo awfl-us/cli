@@ -1,7 +1,9 @@
 """Workspace-scoped SSE tool consumer, using AWFL's existing event parser.
 
-No Firebase/user API key is given to this process. Its capability authorizes only
-reading this workspace's requests and posting bounded responses to those requests.
+The process may receive the owner's normal Firebase/GitHub credentials, as in
+other AWFL cloud consumers. The separate workspace capability authorizes only
+reading this workspace's requests and posting bounded responses. Its bearer
+token is popped from the environment before executing child commands.
 """
 import asyncio
 import json
