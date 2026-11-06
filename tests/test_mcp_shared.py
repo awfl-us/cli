@@ -1,4 +1,5 @@
 import asyncio
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -63,6 +64,14 @@ class ProjectConsumerMCPTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(results, [{"execution_id": "command-123", "state": "running"}])
         finally:
             await server.cleanup()
+
+    async def test_default_runtime_root_uses_local_cwd_when_cloud_override_absent(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch("awfl.consumer.mcp_tools.os.getcwd", return_value=root):
+                with patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("AWFL_CONSUMER_WORKSPACE", None)
+                    handler = MCPRequestHandler()
+                    self.assertEqual(str(handler.runtime.root), root)
 
     async def test_session_viewer_does_not_execute_mcp_commands(self):
         handler = MCPRequestHandler(runtime=object())
