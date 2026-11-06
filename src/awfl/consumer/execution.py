@@ -20,7 +20,7 @@ async def consume_execution_events():
     base = os.environ['AWFL_EXECUTION_URL'].rstrip('/')
     token = os.environ.pop('AWFL_EXECUTION_TOKEN')
     deadline = float(os.environ['AWFL_EXECUTION_EXPIRES_AT']) / 1000
-    runtime = Runtime('/workspace')
+    runtime = Runtime(os.environ.get('AWFL_EXECUTION_WORKSPACE', '/workspace'))
     cursor = 0
     # Response cache prevents repeating side effects after an SSE reconnect.
     results = {}
