@@ -27,6 +27,24 @@ from .debug import dbg, is_debug, is_debug_raw
 from .mcp_tools import MCPRequestHandler
 
 
+async def _forward_sse_event(obj, evt_type, *, scope, mcp_handler):
+    """Route using the SSE *event* field, not a field inside its JSON data.
+
+    The server emits `event: mcp_tool_call` with `data: {mcp, tool_call}`.
+    The JSON payload deliberately does not repeat the envelope's type/source.
+    Failing to use evt_type sends MCP commands through the ordinary tool
+    executor, where they run without claiming or completing their MCP request.
+    """
+    mode = "execute" if scope == "project" else "log"
+    if evt_type in ("mcp_tool_call", "mcp_tool_result"):
+        if evt_type == "mcp_tool_call" and scope == "project" and mcp_handler:
+            mcp_handler.dispatch({"type": evt_type, "source": "mcp", "data": obj})
+        elif scope == "session":
+            await forward_event(obj, mode="log")
+        return
+    await forward_event(obj, mode=mode)
+
+
 async def _resolve_project_and_workspace(
     session_http: aiohttp.ClientSession,
     forced_session_id: Optional[str],
@@ -450,16 +468,8 @@ async def consume_events_sse(
 
                                 # Forward to CLI response handler according to scope
                                 try:
-                                    mode = "execute" if scope == "project" else "log"
                                     if isinstance(obj, dict):
-                                        if obj.get('type') in ('mcp_tool_call', 'mcp_tool_result'):
-                                            # Project runner executes MCP requests; session viewers only log them.
-                                            if mcp_handler and obj.get('type') == 'mcp_tool_call':
-                                                mcp_handler.dispatch(obj)
-                                            elif scope == 'session':
-                                                await forward_event(obj.get('data') or {}, mode='log')
-                                        else:
-                                            await forward_event(obj, mode=mode)  # ordinary workflow events
+                                        await _forward_sse_event(obj, evt_type, scope=scope, mcp_handler=mcp_handler)
                                     else:
                                         # Non-dict payloads are unexpected; log and skip forwarding to avoid attribute errors downstream
                                         kind = type(obj).__name__

@@ -2,14 +2,45 @@ import asyncio
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock, AsyncMock
 
 from aiohttp import web
 
 from awfl.consumer.mcp_tools import MCPRequestHandler
+from awfl.consumer.sse_consumer import _forward_sse_event
 
 
 class ProjectConsumerMCPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sse_event_type_dispatches_project_mcp_without_ordinary_execution(self):
+        # Exactly the event format produced by the server: the envelope type is
+        # an SSE header, while its JSON body contains only the event data.
+        payload = {
+            "mcp": {"workspace_id": "a" * 32, "request_id": 1},
+            "tool_call": {"function": {"name": "RUN_COMMAND", "arguments": {"command": "echo ok"}}},
+        }
+        consumer = Mock()
+        with patch("awfl.consumer.sse_consumer.forward_event", new_callable=AsyncMock) as normal:
+            await _forward_sse_event(payload, "mcp_tool_call", scope="project", mcp_handler=consumer)
+            consumer.dispatch.assert_called_once_with({
+                "type": "mcp_tool_call", "source": "mcp", "data": payload,
+            })
+            normal.assert_not_awaited()  # Never run this command twice.
+
+            consumer.reset_mock()
+            await _forward_sse_event({"content": "completed"}, "mcp_tool_result",
+                                     scope="project", mcp_handler=consumer)
+            consumer.dispatch.assert_not_called()
+            normal.assert_not_awaited()
+
+            await _forward_sse_event(payload, "mcp_tool_call", scope="session", mcp_handler=None)
+            normal.assert_awaited_once_with(payload, mode="log")
+            normal.reset_mock()
+
+            await _forward_sse_event({"tool_call": {"function": {"name": "RUN_COMMAND"}}},
+                                     "message", scope="project", mcp_handler=consumer)
+            normal.assert_awaited_once()
+            self.assertEqual(normal.await_args.kwargs["mode"], "execute")
+
     async def test_mcp_request_uses_existing_project_auth_and_claims_once(self):
         claims = []
         results = []
