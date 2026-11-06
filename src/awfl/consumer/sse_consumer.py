@@ -63,6 +63,12 @@ async def consume_events_sse(
     - "cancelled": Task was cancelled (shutdown) (benign).
     - "ended": Stream ended and loop exited (unexpected).
     """
+    # Same consumer entry point; isolated cloud workspaces use a least-privilege
+    # capability rather than user-wide Firebase credentials/project discovery.
+    if os.environ.get('AWFL_EXECUTION_URL'):
+        from .execution import consume_execution_events
+        return await consume_execution_events()
+
     # Resolve defaults
     if stream_url is None:
         origin = get_api_origin()
