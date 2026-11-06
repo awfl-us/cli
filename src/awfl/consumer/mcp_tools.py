@@ -26,8 +26,8 @@ NAMES = {
 
 
 class MCPRequestHandler:
-    def __init__(self):
-        self.runtime = Runtime(os.getenv("AWFL_EXECUTION_WORKSPACE", "/workspace"))
+    def __init__(self, runtime=None):
+        self.runtime = runtime if runtime is not None else Runtime(os.getenv("AWFL_CONSUMER_WORKSPACE", "/workspace"))
         self.tasks = set()
 
     def dispatch(self, event):
