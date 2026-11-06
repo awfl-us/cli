@@ -37,7 +37,24 @@ def _get_cwd_for_commands(workdir: str | os.PathLike | None) -> str:
         return str(Path.cwd())
 
 
-async def handle_response(data: dict):
+async def handle_response(data: dict, *, runtime=None, callback=None):
+    # The cloud MCP mode uses the same tool-call envelope and dispatch path.
+    # Legacy workflow execution retains its original behavior.
+    if runtime is not None:
+        fn = (data.get('tool_call') or {}).get('function') or {}
+        names = {'RUN_COMMAND': 'run_command', 'READ_FILE': 'read_file',
+                 'UPDATE_FILE': 'write_file', 'COMMAND_OUTPUT': 'command_output',
+                 'COMMAND_CANCEL': 'command_cancel', 'ENVIRONMENT_STATUS': 'environment_status'}
+        try:
+            args = fn.get('arguments') or {}
+            if isinstance(args, str):
+                args = json.loads(args)
+            payload = await runtime.invoke(names[fn['name']], args)
+        except Exception as error:
+            payload = {'error': type(error).__name__ + ': ' + str(error)[:200]}
+        await callback(payload)
+        return
+
     # Internal callback by id is now required; direct callback URLs are no longer supported
     callback_id = data.get("callback_id")
 

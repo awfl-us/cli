@@ -234,6 +234,9 @@ def _is_headless() -> bool:
 
 
 async def main():
+    if os.environ.get('AWFL_EXECUTION_URL'):
+        await consume_events_sse(scope='project')
+        return
     # Initialize session to the full selected workflow name (with env suffix)
     initial_session = _compute_session_workflow_name()
     set_session(initial_session)
