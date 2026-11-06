@@ -59,13 +59,20 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.executions[result['execution_id']]['task']
         self.assertEqual(self.runtime.output(result['execution_id'], 0)['reason'], 'timeout')
 
-    async def test_concurrency_and_credential_scrubbing(self):
+    async def test_concurrency_and_credential_forwarding(self):
         os.environ['AWFL_EXECUTION_TOKEN'] = 'sensitive-test-token'
+        os.environ['GITHUB_TOKEN'] = 'test-github-credential'
+        os.environ['FIREBASE_ID_TOKEN'] = 'test-firebase-credential'
         try:
-            result = await self.runtime.invoke('run_command', {'command': 'echo ${AWFL_EXECUTION_TOKEN-unset}'})
-            self.assertIn('unset', str(result['chunks']))
+            result = await self.runtime.invoke('run_command', {
+                'command': 'printf "%s|%s|%s" "${AWFL_EXECUTION_TOKEN-unset}" "$GITHUB_TOKEN" "$FIREBASE_ID_TOKEN"'
+            })
+            joined = str(result['chunks'])
+            self.assertIn('unset|test-github-credential|test-firebase-credential', joined)
         finally:
             del os.environ['AWFL_EXECUTION_TOKEN']
+            del os.environ['GITHUB_TOKEN']
+            del os.environ['FIREBASE_ID_TOKEN']
         for _ in range(4):
             await self.runtime.invoke('run_command', {'command': 'sleep 30'})
         with self.assertRaises(ValueError):
