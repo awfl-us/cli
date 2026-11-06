@@ -36,14 +36,12 @@ class ProjectConsumerMCPTests(unittest.IsolatedAsyncioTestCase):
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
         origin = f"http://127.0.0.1:{port}"
-        handler = MCPRequestHandler()
-
         class FakeRuntime:
             async def invoke(self, name, args):
                 calls.append((name, args))
                 return {"execution_id": "command-123", "state": "running"}
 
-        handler.runtime = FakeRuntime()
+        handler = MCPRequestHandler(runtime=FakeRuntime())
         event = {
             "type": "mcp_tool_call", "source": "mcp",
             "sessionId": session, "projectId": "selected-project",
@@ -67,6 +65,6 @@ class ProjectConsumerMCPTests(unittest.IsolatedAsyncioTestCase):
             await server.cleanup()
 
     async def test_session_viewer_does_not_execute_mcp_commands(self):
-        handler = MCPRequestHandler()
+        handler = MCPRequestHandler(runtime=object())
         self.assertIsNone(await handler.handle({"source": "mcp", "data": {}}))
         self.assertIsNone(await handler.handle({"type": "normal_message", "data": {}}))
