@@ -31,8 +31,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         site = web.TCPSite(runner, '127.0.0.1', 0)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
+        workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
         env = {**os.environ, 'AWFL_EXECUTION_URL': f'http://127.0.0.1:{port}', 'AWFL_EXECUTION_TOKEN': token,
-               'AWFL_EXECUTION_EXPIRES_AT': '9999999999999'}
+               'AWFL_EXECUTION_EXPIRES_AT': '9999999999999', 'AWFL_EXECUTION_WORKSPACE': workspace.name}
         process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'awfl.main', 'run', env=env,
                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
