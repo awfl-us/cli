@@ -35,7 +35,21 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'awfl.main', 'run', env=env,
                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            payload = await asyncio.wait_for(asyncio.shield(result), 15)
+            done, _ = await asyncio.wait(
+                {result, asyncio.create_task(process.wait())},
+                timeout=30,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if result not in done:
+                if process.returncode is None:
+                    process.terminate()
+                stdout, stderr = await process.communicate()
+                self.fail(
+                    f'AWFL consumer did not callback; exit={process.returncode}, '
+                    f'stdout={stdout.decode(errors="replace")[-3000:]}, '
+                    f'stderr={stderr.decode(errors="replace")[-3000:]}'
+                )
+            payload = result.result()
             self.assertEqual(payload['exit_code'], 9)
             self.assertIn('transport-ok', str(payload['chunks']))
         finally:
