@@ -4,7 +4,6 @@ from pathlib import Path
 import tempfile
 import unittest
 from awfl.execution.runtime import Runtime
-from awfl.consumer.routing import forward_event
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -16,14 +15,14 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.close()
         self.directory.cleanup()
 
-    async def test_existing_tool_envelope_dispatch(self):
-        received = []
-        async def callback(payload):
-            received.append(payload)
-        await forward_event({'tool_call': {'function': {'name': 'RUN_COMMAND', 'arguments': {'command': 'echo hello; echo err >&2; exit 7'}}}},
-                            mode='execute', runtime=self.runtime, callback=callback)
-        self.assertEqual(received[0]['exit_code'], 7)
-        self.assertEqual({c['stream'] for c in received[0]['chunks']}, {'stdout', 'stderr'})
+    async def test_command_output_in_shared_runtime(self):
+        result = await self.runtime.invoke('run_command', {
+            'command': 'echo hello; echo err >&2; exit 7'
+        })
+        await self.runtime.executions[result['execution_id']]['task']
+        output = self.runtime.output(result['execution_id'], 0)
+        self.assertEqual(output['exit_code'], 7)
+        self.assertEqual({c['stream'] for c in output['chunks']}, {'stdout', 'stderr'})
 
     async def test_poll_cancel_and_reuse(self):
         result = await self.runtime.invoke('run_command', {'command': 'echo first; sleep 30; echo last'})
