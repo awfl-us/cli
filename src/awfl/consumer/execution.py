@@ -1,7 +1,9 @@
 """Workspace-scoped SSE tool consumer, using AWFL's existing event parser.
 
-No Firebase/user API key is given to this process. Its capability authorizes only
-reading this workspace's requests and posting bounded responses to those requests.
+The process may receive the owner's normal Firebase/GitHub credentials, as in
+other AWFL cloud consumers. The separate workspace capability authorizes only
+reading this workspace's requests and posting bounded responses. Its bearer
+token is popped from the environment before executing child commands.
 """
 import asyncio
 import json
@@ -18,7 +20,7 @@ async def consume_execution_events():
     base = os.environ['AWFL_EXECUTION_URL'].rstrip('/')
     token = os.environ.pop('AWFL_EXECUTION_TOKEN')
     deadline = float(os.environ['AWFL_EXECUTION_EXPIRES_AT']) / 1000
-    runtime = Runtime('/workspace')
+    runtime = Runtime(os.environ.get('AWFL_EXECUTION_WORKSPACE', '/workspace'))
     cursor = 0
     # Response cache prevents repeating side effects after an SSE reconnect.
     results = {}

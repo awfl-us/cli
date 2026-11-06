@@ -66,9 +66,11 @@ class Runtime:
             execution_id = uuid.uuid4().hex
             item = {'state': 'running', 'exit_code': None, 'chunks': [], 'bytes': 0, 'truncated': False, 'reason': None}
             self.executions[execution_id] = item
-            # Deliberately exclude the consumer capability and all control-plane credentials.
-            env = {k: v for k, v in os.environ.items() if k in {
-                'PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'PLAYWRIGHT_BROWSERS_PATH', 'PYTHONUNBUFFERED', 'TMPDIR'}}
+            # MCP commands run as this owner's regular AWFL cloud consumer.
+            # Preserve its GitHub/Firebase/GCP credentials and other configured
+            # environment variables, but do not pass the private MCP callback
+            # capability to child shells.
+            env = {k: v for k, v in os.environ.items() if not k.startswith('AWFL_EXECUTION_')}
             try:
                 item['process'] = await asyncio.create_subprocess_exec(
                     '/bin/bash', '-c', args['command'], cwd=cwd, env=env,
