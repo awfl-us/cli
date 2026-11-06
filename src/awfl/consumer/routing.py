@@ -24,7 +24,7 @@ def event_session_id(obj: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-async def forward_event(obj: Dict[str, Any], mode: Mode = "both", *, runtime=None, callback=None) -> None:
+async def forward_event(obj: Dict[str, Any], mode: Mode = "both") -> None:
     """Route an incoming event to logging, execution, or both.
 
     - mode="execute": perform side effects only (no logs)
@@ -46,4 +46,4 @@ async def forward_event(obj: Dict[str, Any], mode: Mode = "both", *, runtime=Non
             pass
 
     if mode in ("execute", "both"):
-        await handle_response(obj, runtime=runtime, callback=callback)
+        await handle_response(obj)

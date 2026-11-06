@@ -17,14 +17,6 @@ async def post_internal_callback(callback_id: str, payload: dict, *, correlation
     - Minimal retry: one attempt plus at most one fixed-delay retry on transient errors (429, 5xx) or network/timeout errors.
     - No logging.
     """
-    if execution_url is not None:
-        # Scope is supplied by the consumer, never by an event/client argument.
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.post(execution_url + '/results/' + callback_id, json=payload,
-                                    headers={'Authorization': 'Bearer ' + execution_token}) as response:
-                response.raise_for_status()
-        return
-
     _ = correlation_id  # kept for signature compatibility
 
     origin = (get_api_origin() or "").rstrip('/')

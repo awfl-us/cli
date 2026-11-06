@@ -24,6 +24,7 @@ from .leader_lock import (
 )
 from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
+from .mcp_tools import MCPRequestHandler
 
 
 async def _resolve_project_and_workspace(
@@ -63,12 +64,6 @@ async def consume_events_sse(
     - "cancelled": Task was cancelled (shutdown) (benign).
     - "ended": Stream ended and loop exited (unexpected).
     """
-    # Same consumer entry point; isolated cloud workspaces use a least-privilege
-    # capability rather than user-wide Firebase credentials/project discovery.
-    if os.environ.get('AWFL_EXECUTION_URL'):
-        from .execution import consume_execution_events
-        return await consume_execution_events()
-
     # Resolve defaults
     if stream_url is None:
         origin = get_api_origin()
@@ -86,6 +81,9 @@ async def consume_events_sse(
         log_unique("🔎 SSE debug enabled via AWFL_SSE_DEBUG=1")
     if is_debug_raw():
         log_unique("🧪 SSE raw payload logging enabled via AWFL_SSE_DEBUG_RAW=1 (use with caution)")
+
+    # MCP uses the exact same project SSE connection and environment as CLI clients.
+    mcp_handler = MCPRequestHandler() if scope == 'project' else None
 
     last_ws_id: Optional[str] = None
     last_session_id: Optional[str] = None
@@ -454,7 +452,14 @@ async def consume_events_sse(
                                 try:
                                     mode = "execute" if scope == "project" else "log"
                                     if isinstance(obj, dict):
-                                        await forward_event(obj, mode=mode)  # project executes silently; session logs only
+                                        if obj.get('type') in ('mcp_tool_call', 'mcp_tool_result'):
+                                            # Project runner executes MCP requests; session viewers only log them.
+                                            if mcp_handler and obj.get('type') == 'mcp_tool_call':
+                                                mcp_handler.dispatch(obj)
+                                            elif scope == 'session':
+                                                await forward_event(obj.get('data') or {}, mode='log')
+                                        else:
+                                            await forward_event(obj, mode=mode)  # ordinary workflow events
                                     else:
                                         # Non-dict payloads are unexpected; log and skip forwarding to avoid attribute errors downstream
                                         kind = type(obj).__name__
