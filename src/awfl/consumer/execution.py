@@ -24,7 +24,7 @@ async def consume_execution_events():
     results = {}
     timeout = aiohttp.ClientTimeout(total=None, connect=15, sock_read=45)
     try:
-        async with aiohttp.ClientSession(headers={'Authorization': f'Bearer {token}'}, timeout=timeout) as http:
+        async with aiohttp.ClientSession(headers={'Authorization': f'Bearer {token}'}, timeout=timeout, read_bufsize=262144) as http:
             while time.time() < deadline:
                 try:
                     async with http.get(base + '/stream', headers={'Last-Event-ID': str(cursor)}) as response:
