@@ -452,11 +452,12 @@ async def consume_events_sse(
                                 try:
                                     mode = "execute" if scope == "project" else "log"
                                     if isinstance(obj, dict):
-                                        if obj.get('type') == 'mcp_tool_call':
-                                            # The tool's atomic server-side claim prevents replayed side effects.
-                                            # Session viewers can still observe the event in ordinary AWFL history.
-                                            if mcp_handler:
+                                        if obj.get('type') in ('mcp_tool_call', 'mcp_tool_result'):
+                                            # Project runner executes MCP requests; session viewers only log them.
+                                            if mcp_handler and obj.get('type') == 'mcp_tool_call':
                                                 mcp_handler.dispatch(obj)
+                                            elif scope == 'session':
+                                                await forward_event(obj.get('data') or {}, mode='log')
                                         else:
                                             await forward_event(obj, mode=mode)  # ordinary workflow events
                                     else:
