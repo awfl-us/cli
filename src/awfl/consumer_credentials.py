@@ -71,7 +71,10 @@ def refresh():
         _atomic_write(os.environ["AWFL_GITHUB_TOKEN_FILE"], github_token)
 
 def main():
-    if "--git-credential" in sys.argv:\n        git_credential()\n        return\n    once = "--once" in sys.argv
+    if "--git-credential" in sys.argv:
+        git_credential()
+        return
+    once = "--once" in sys.argv
     while True:
         try:
             refresh()
