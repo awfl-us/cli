@@ -1,10 +1,13 @@
 import asyncio
 import hashlib
 from pathlib import Path
+import os
+import resource
+from unittest.mock import patch
 import tempfile
 import unittest
 
-from awfl.execution.runtime import Runtime
+from awfl.execution.runtime import Runtime, child_limits
 
 
 class NativeRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -137,3 +140,19 @@ class NativeRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BrowserResourceLimitsTests(unittest.TestCase):
+    def test_headless_browser_gets_bounded_process_thread_budget(self):
+        with patch.dict(os.environ, {"AWFL_EXEC_SUBPROCESS_MAX_TASKS": "2048"}):
+            with patch("awfl.execution.runtime.resource.setrlimit") as setter:
+                child_limits()
+        setter.assert_any_call(resource.RLIMIT_NPROC, (2048, 2048))
+        setter.assert_any_call(resource.RLIMIT_NOFILE, (4096, 4096))
+
+    def test_resource_limit_env_is_clamped_and_invalid_input_is_safe(self):
+        for value, expected in (("bad", 2048), ("10", 512), ("999999", 4096)):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"AWFL_EXEC_SUBPROCESS_MAX_TASKS": value}):
+                    with patch("awfl.execution.runtime.resource.setrlimit") as setter:
+                        child_limits()
+                setter.assert_any_call(resource.RLIMIT_NPROC, (expected, expected))
