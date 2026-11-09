@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 
 from awfl.utils import log_unique
+from awfl.consumer_credentials import subprocess_credentials
 
 from .callbacks import post_internal_callback
 from .mcp_native import handle_native, NATIVE_NAMES
@@ -138,6 +139,7 @@ async def handle_response(data: dict, *, runtime=None, callback=None):
                         text=True,
                         timeout=timeout_sec,
                         cwd=_get_cwd_for_commands(workdir),
+                        env=subprocess_credentials(),
                     )
                     output_full = result.stdout or ""
                     error = (result.stderr or "").strip()
