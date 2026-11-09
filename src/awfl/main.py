@@ -13,7 +13,6 @@ from awfl.response_handler import set_session, get_latest_status
 from awfl.utils import log_lines, log_unique, trigger_workflow
 from awfl.commands import handle_command
 from awfl.consumer import consume_events_sse
-from awfl.response_handler.callbacks import close_callback_session
 from awfl.state import set_workflow_env_suffix, get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
 
 
@@ -295,7 +294,6 @@ async def main():
                 with contextlib.suppress(asyncio.CancelledError):
                     if t:
                         await t
-            await close_callback_session()
         return
 
     # Interactive REPL path
@@ -379,7 +377,6 @@ async def main():
             with contextlib.suppress(asyncio.CancelledError):
                 if t:
                     await t
-        await close_callback_session()
 
 
 if __name__ == "__main__":
