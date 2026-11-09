@@ -49,5 +49,43 @@
     "Both groups are five warm-consumer end-to-end MCP calls on identical command and yield settings, but different project consumers and network conditions.",
     "The result is real, measured end-to-end performance; do not interpret the 4.083s difference as entirely Firestore time without separate persisted timestamps.",
     "Output persistence now uses two batch transactions for 32 typical 8KiB chunks, rather than 32 individual transactions."
-  ]
+  ],
+  "large_output_test": {
+    "bytes": 10485760,
+    "command": "python -c \"import sys; sys.stdout.write('x'*10485760)\"",
+    "end_to_end_latency_ms": 15710,
+    "execution_id": "028bb61c71fa7c313fed4b0500000007",
+    "state": "completed",
+    "exit_code": 0,
+    "persisted_chunks": 1280,
+    "first_page": {
+      "cursors": [
+        1,
+        8
+      ],
+      "bytes": 65536
+    },
+    "last_page": {
+      "cursors": [
+        1273,
+        1280
+      ],
+      "bytes": 65536,
+      "has_more": false
+    },
+    "truncated": false,
+    "output_incomplete": false,
+    "notes": "Command finished in one MCP call; last cursor confirms all prior events were persisted by transactional cursor advancement. Full 10MiB was not re-downloaded page by page in this test."
+  },
+  "mixed_channels_nonzero_exit": {
+    "stdout": "OUT\n",
+    "stderr": "ERR\n",
+    "cursors": [
+      1,
+      2
+    ],
+    "state": "completed",
+    "exit_code": 7,
+    "error": null
+  }
 }
