@@ -32,6 +32,7 @@ SKIP_FILES = {
 }
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_FILES = 10000
+STARTUP_RESTORE_CONCURRENCY = 16
 
 
 def allowed_file(rel: str) -> bool:
@@ -263,6 +264,9 @@ class WorkspaceSync:
                 local = await asyncio.to_thread(self._scan)
                 changed = 0
                 conflicts = []
+                # Restore independent cold-start files concurrently after the
+                # regular generation-safe merge; keep steady-state logic intact.
+                pending_restores = []
                 for rel in sorted(set(remote) | set(local) | set(self.manifest)):
                     baseline = self.manifest.get(rel)
                     r = remote.get(rel)
@@ -281,15 +285,7 @@ class WorkspaceSync:
                         elif baseline:
                             conflicts.append(rel)
                         elif r["size"] <= MAX_FILE_BYTES:
-                            content = await self._download(session, token, rel, r["generation"])
-                            target = _safe_target(self.root, rel)
-                            if target.exists():  # A tool may have created it since the scan.
-                                conflicts.append(rel)
-                                continue
-                            await asyncio.to_thread(_atomic_write, target, content, r["mode"])
-                            fingerprint = await asyncio.to_thread(_fingerprint, target)
-                            self.manifest[rel] = {**fingerprint, "generation": r["generation"]}
-                            changed += 1
+                            pending_restores.append((rel, r))
                         continue
                     if r and l:
                         if not baseline or (r["generation"] != previous_generation and l["sha256"] != previous_hash):
@@ -334,7 +330,43 @@ class WorkspaceSync:
                         changed += 1
                     elif baseline:
                         self.manifest.pop(rel, None)
+
+                restore_errors = []
+                if pending_restores:
+                    semaphore = asyncio.Semaphore(STARTUP_RESTORE_CONCURRENCY)
+
+                    async def restore_one(rel, record):
+                        async with semaphore:
+                            content = await self._download(session, token, rel, record["generation"])
+                            target = _safe_target(self.root, rel)
+                            # Don't overwrite files created after the scan.
+                            if target.exists() or target.is_symlink():
+                                return rel, None
+                            await asyncio.to_thread(_atomic_write, target, content, record["mode"])
+                            fingerprint = await asyncio.to_thread(_fingerprint, target)
+                            return rel, {**fingerprint, "generation": record["generation"]}
+
+                    # Keep successful entries when individual requests fail,
+                    # so a retry can pick up without false local conflicts.
+                    results = await asyncio.gather(
+                        *(restore_one(rel, record) for rel, record in pending_restores),
+                        return_exceptions=True,
+                    )
+                    for result in results:
+                        if isinstance(result, BaseException):
+                            restore_errors.append(result)
+                        else:
+                            rel, entry = result
+                            if entry is None:
+                                conflicts.append(rel)
+                            else:
+                                self.manifest[rel] = entry
+                                changed += 1
                 await asyncio.to_thread(self._save_manifest)
+                if restore_errors:
+                    raise RuntimeError(
+                        f"Workspace restore failed for {len(restore_errors)} object(s)"
+                    ) from restore_errors[0]
                 if conflicts:
                     raise RuntimeError(f"Workspace sync found {len(conflicts)} conflict(s): {', '.join(conflicts[:5])}")
                 return changed
@@ -342,7 +374,10 @@ class WorkspaceSync:
     async def start(self):
         if self.task:
             return
-        await self.sync_once()  # Hydrate BEFORE accepting project tool commands.
+        started = time.monotonic()
+        changed = await self.sync_once()  # Hydrate BEFORE accepting project tool commands.
+        print(f"[awfl] Initial GCS workspace sync: {changed} files changed in "
+              f"{time.monotonic() - started:.2f}s", flush=True)
         self.task = asyncio.create_task(self._periodic(), name="awfl-workspace-gcs-sync")
 
     async def _periodic(self):
