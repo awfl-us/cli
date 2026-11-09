@@ -223,10 +223,14 @@ class WorkspaceSync:
             response.raise_for_status()
             if response.content_length and response.content_length > MAX_FILE_BYTES:
                 raise RuntimeError("Remote workspace file exceeds size limit")
-            content = await response.content.read(MAX_FILE_BYTES + 1)
-            if len(content) > MAX_FILE_BYTES:
-                raise RuntimeError("Remote workspace file exceeds size limit")
-            return content
+            chunks = []
+            size = 0
+            async for chunk in response.content.iter_chunked(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise RuntimeError("Remote workspace file exceeds size limit")
+                chunks.append(chunk)
+            return b"".join(chunks)
 
     async def _upload(self, session, token, rel, content, generation, mode=0o644):
         url = f"https://storage.googleapis.com/upload/storage/v1/b/{quote(self.bucket, safe='')}/o"
