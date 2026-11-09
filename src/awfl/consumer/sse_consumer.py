@@ -411,6 +411,7 @@ async def consume_events_sse(
                                     "/workflows/projects/{}/consumer-heartbeat".format(project_id),
                                     json={
                                         "consumerId": get_consumer_id(),
+                                        "podUid": os.environ.get("AWFL_POD_UID", ""),
                                         "connected": True,
                                         "capacity": 4,
                                         "activeExecutions": active[:64],
