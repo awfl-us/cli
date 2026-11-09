@@ -50,13 +50,13 @@ async def post_internal_callback(callback_id: str, payload: dict, *, correlation
                         status = resp.status
                         # Success
                         if status < 400:
-                            return
+                            return True
 
                         # Transient statuses eligible for single retry
                         is_transient = (status == 429) or (500 <= status < 600)
 
                         if not is_transient or attempt == max_attempts:
-                            return
+                            return False
 
                         # Fixed delay before the one-and-only retry
                         await asyncio.sleep(retry_delay_ms / 1000.0)
@@ -64,13 +64,13 @@ async def post_internal_callback(callback_id: str, payload: dict, *, correlation
 
                 except (asyncio.TimeoutError, aiohttp.ClientError):
                     if attempt == max_attempts:
-                        return
+                        return False
                     await asyncio.sleep(retry_delay_ms / 1000.0)
                     continue
                 except Exception:
                     # Unknown error: do not retry
-                    return
+                    return False
 
     except Exception:
         # Setup failure – nothing else to do
-        return
+        return False
