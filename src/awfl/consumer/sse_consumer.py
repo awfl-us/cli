@@ -26,6 +26,10 @@ from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
 from .mcp_tools import MCPRequestHandler
 
+# MCP calls may run for hours; the SSE reader must remain free to receive
+# cancellations and unrelated clients' commands. Tasks run in the SAME process.
+_MCP_INFLIGHT = set()
+
 
 async def _forward_sse_event(obj, evt_type, *, scope, mcp_handler):
     """Route using the SSE *event* field, not a field inside its JSON data.
@@ -41,6 +45,11 @@ async def _forward_sse_event(obj, evt_type, *, scope, mcp_handler):
             mcp_handler.dispatch({"type": evt_type, "source": "mcp", "data": obj})
         elif scope == "session":
             await forward_event(obj, mode="log")
+        return
+    if scope == "project" and evt_type == "message" and isinstance(obj, dict) and obj.get("mcp"):
+        task = asyncio.create_task(forward_event(obj, mode="execute"))
+        _MCP_INFLIGHT.add(task)
+        task.add_done_callback(_MCP_INFLIGHT.discard)
         return
     await forward_event(obj, mode=mode)
 
