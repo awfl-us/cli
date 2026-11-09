@@ -142,7 +142,11 @@ def write_file(runtime, args: dict) -> dict:
         actual = path.read_bytes() if path.exists() else None
         if actual != before:
             raise PatchConflict("File changed during write")
-        os.replace(name, path)
+        if create_only or before is None:
+            # Files created with create_only cannot overwrite concurrent files.
+            os.link(name, path, follow_symlinks=False)
+        else:
+            os.replace(name, path)
     finally:
         try:
             os.unlink(name)
