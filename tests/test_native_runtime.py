@@ -123,6 +123,26 @@ class NativeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(page["truncated"])
         self.assertEqual(page["state"], "completed")
 
+    async def test_named_session_reuses_running_process_and_accepts_binary_input(self):
+        first = await self.runtime.invoke("run_command", {
+            "command": "read line; printf 'line:%s\\n' \"$line\"",
+            "session_id": "shell-1", "interactive": True, "yield_time_ms": 0,
+        })
+        reused = await self.runtime.invoke("run_command", {
+            "command": "this should not execute", "session_id": "shell-1",
+        })
+        self.assertEqual(first["execution_id"], reused["execution_id"])
+        import base64
+        await self.runtime.invoke("command_input", {
+            "execution_id": first["execution_id"],
+            "input_base64": base64.b64encode(b"binary-safe\n").decode(),
+            "eof": True,
+        })
+        await self.runtime.executions[first["execution_id"]]["task"]
+        final = self.runtime.output(first["execution_id"], 0)
+        self.assertEqual(final["state"], "completed")
+        self.assertIn("line:binary-safe", final["stdout"])
+
     async def test_cwd_is_per_command_not_global(self):
         (self.root / "nested").mkdir()
         one, two = await asyncio.gather(
