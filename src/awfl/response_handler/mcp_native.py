@@ -48,6 +48,8 @@ async def handle_native(data, name, args, send_result):
     command = NATIVE_NAMES.get(name)
     if not command:
         return False
+    if command in ("read_file", "write_file") and "filepath" in args:
+        args = {**args, "path": args["filepath"]}
     meta = data.get("mcp") or {}
     runtime = shared_runtime()
     callback_id = data.get("callback_id")
