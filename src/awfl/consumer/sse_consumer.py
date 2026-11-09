@@ -47,7 +47,8 @@ async def _forward_sse_event(obj, evt_type, *, scope, mcp_handler):
             await forward_event(obj, mode="log")
         return
     if scope == "project" and evt_type == "message" and isinstance(obj, dict) and obj.get("mcp"):
-        task = asyncio.create_task(forward_event(obj, mode="execute"))
+        eid = str((obj.get("mcp") or {}).get("execution_id") or "unknown")
+        task = asyncio.create_task(forward_event(obj, mode="execute"), name="mcp-" + eid)
         _MCP_INFLIGHT.add(task)
         task.add_done_callback(_MCP_INFLIGHT.discard)
         return
@@ -395,6 +396,42 @@ async def consume_events_sse(
                         f"✅ SSE connected (workspace={ws_id}, scope={scope}). Resuming after id={resume_id or 'None'}"
                     )
 
+                    async def _mcp_heartbeat_loop():
+                        # Readiness is application-level: publish only AFTER the
+                        # project SSE connection is established. The server
+                        # fences stale generations against its project lock.
+                        while True:
+                            try:
+                                active = [task.get_name()[4:] for task in _MCP_INFLIGHT
+                                          if not task.done() and task.get_name().startswith("mcp-")]
+                                hb_headers = {"Content-Type": "application/json"}
+                                hb_headers.update(get_auth_headers())
+                                async with session_http.post(
+                                    get_api_origin().rstrip("/") +
+                                    "/workflows/projects/{}/consumer-heartbeat".format(project_id),
+                                    json={
+                                        "consumerId": get_consumer_id(),
+                                        "connected": True,
+                                        "capacity": 4,
+                                        "activeExecutions": active[:64],
+                                        "capabilities": ["shell", "pty", "command_input",
+                                                         "apply_patch", "search_files",
+                                                         "list_directory", "file_metadata"],
+                                    },
+                                    headers=hb_headers,
+                                    timeout=aiohttp.ClientTimeout(total=8),
+                                ) as hb:
+                                    if hb.status == 409:
+                                        log_unique("⚠️ Consumer heartbeat rejected (stale project lock)")
+                            except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+                                pass
+                            await asyncio.sleep(10)
+
+                    heartbeat_task = (
+                        asyncio.create_task(_mcp_heartbeat_loop(), name="awfl-consumer-heartbeat")
+                        if scope == "project" else None
+                    )
+
                     parser = SSEParser()
                     evt_count = 0
 
@@ -532,6 +569,10 @@ async def consume_events_sse(
                                     except Exception as e:
                                         log_unique(f"⚠️ Failed to update cursor: {e}")
                     finally:
+                        if heartbeat_task and not heartbeat_task.done():
+                            heartbeat_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await heartbeat_task
                         if not idle_task.done():
                             idle_task.cancel()
                             with contextlib.suppress(asyncio.CancelledError):
