@@ -8,6 +8,7 @@ from datetime import datetime
 from awfl.utils import log_unique
 
 from .callbacks import post_internal_callback
+from .mcp_native import handle_native, NATIVE_NAMES
 from .rh_utils import read_file_text_utf8_ignore, sanitize_shell_command
 from .session_state import get_session
 
@@ -75,6 +76,12 @@ async def handle_response(data: dict, *, runtime=None, callback=None):
                 "error": f"Failed to parse tool arguments: {args_raw!r}\n{e}"
             })
             args = {}
+
+        # MCP extensions reuse the ordinary project SSE/callback transport.
+        # Dispatch asynchronous commands without blocking the SSE reader.
+        if data.get("mcp") and name in NATIVE_NAMES:
+            await handle_native(data, name, args, send_result)
+            return
 
         if name == "UPDATE_FILE":
             filepath = args.get("filepath")
