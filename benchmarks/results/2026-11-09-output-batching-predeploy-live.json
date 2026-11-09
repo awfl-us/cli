@@ -11,13 +11,20 @@
   "samples_ms": [
     7367,
     6763,
-    6043
+    6043,
+    9302,
+    6266
   ],
   "median_ms": 6763,
   "min_ms": 6043,
-  "max_ms": 7367,
+  "max_ms": 9302,
   "output_bytes": 262144,
   "output_chunks_expected": 32,
   "all_completed_exit_zero": true,
-  "caveat": "End-to-end tool call timing includes upstream MCP/Cloud Run latency, not only Firestore persistence; initial output response deliberately limited to one 8KiB chunk. Same project/image not used for post-deploy test."
+  "caveat": "End-to-end tool call timing includes upstream MCP/Cloud Run latency, not only Firestore persistence; initial output response deliberately limited to one 8KiB chunk. Same project/image not used for post-deploy test.",
+  "n": 5,
+  "range_ms": [
+    6043,
+    9302
+  ]
 }
