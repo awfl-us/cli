@@ -1,0 +1,28 @@
+{
+  "benchmark": "mcp-run-command-end-to-end",
+  "captured_on": "2026-11-09",
+  "status": "before-image-rollout",
+  "workspace_id": "0615c29d4a2e3c4f475a46d599672d43",
+  "command": "printf 'CALLBACK_BASELINE_OK\\n'",
+  "n": 8,
+  "tool_runtime": "ChatGPT AWFL MCP to existing GKE consumer",
+  "cli_version": "pre-connection-pool image (CLI 0fe285ba)",
+  "warm_consumer": true,
+  "median_ms": 2378,
+  "range_ms": [
+    2180,
+    12928
+  ],
+  "samples_ms": [
+    12928,
+    2515,
+    2262,
+    2215,
+    2328,
+    12198,
+    2428,
+    2180
+  ],
+  "all_completed_exit_zero": true,
+  "notes": "Two high upstream/network outliers. This full round trip has large variance unrelated to local callback HTTP pool overhead. Use median and distribution, not one reading."
+}
