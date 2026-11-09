@@ -50,6 +50,14 @@ async def handle_native(data, name, args, send_result):
         return False
     meta = data.get("mcp") or {}
     runtime = shared_runtime()
+    callback_id = data.get("callback_id")
+    # The server's existing request record is claimed transactionally BEFORE
+    # any side effect. SSE reconnects cannot replay a completed command.
+    if not callback_id or not await post_internal_callback(callback_id, {
+        "_awfl_mcp_event": "claim",
+        "consumer_id": os.environ.get("AWFL_CONSUMER_ID", ""),
+    }):
+        return True
     if command != "run_command":
         try:
             result = await runtime.invoke(command, args)
@@ -64,7 +72,6 @@ async def handle_native(data, name, args, send_result):
                           "message": "Missing execution ID", "retryable": False}})
         return True
     params = {**args, "execution_id": execution_id}
-    callback_id = data.get("callback_id")
     send_lock = asyncio.Lock()
     persisted = set()
 
