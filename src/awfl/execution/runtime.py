@@ -228,9 +228,35 @@ class Runtime:
     def _kill(self, item):
         self._signal(item, signal.SIGKILL)
 
+    @staticmethod
+    def _redact_known_credentials(text):
+        # Tool output is persisted to Firestore. Replace identifiable tokens
+        # before returning them or sending output callbacks. This does not
+        # replace OS-level credential isolation for arbitrary shell commands.
+        secrets = []
+        for key in ("GITHUB_TOKEN", "GH_TOKEN", "FIREBASE_ID_TOKEN",
+                    "FIREBASE_CUSTOM_TOKEN", "AWFL_PROJECT_LOCK_TOKEN",
+                    "AWFL_CREDENTIAL_REFRESH_CAPABILITY",
+                    "CLOUDSDK_AUTH_ACCESS_TOKEN"):
+            token = os.environ.get(key)
+            if token and len(token) >= 8:
+                secrets.append(token)
+        token_file = os.environ.get("AWFL_GITHUB_TOKEN_FILE")
+        if token_file:
+            try:
+                secret = Path(token_file).read_text().strip()
+                if len(secret) >= 8:
+                    secrets.append(secret)
+            except OSError:
+                pass
+        for secret in set(secrets):
+            text = text.replace(secret, "[REDACTED]")
+        return text
+
     async def _append_chunk(self, item, stream, text):
         if not text:
             return
+        text = self._redact_known_credentials(text)
         if item["bytes"] >= self.output_limit:
             item["truncated"] = True
             item["reason"] = "output_limit"
