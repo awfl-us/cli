@@ -98,6 +98,31 @@ class NativeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         events = self.runtime.output(other["execution_id"], 0)["chunks"]
         self.assertTrue(any(x["stream"] == "pty" and "from-pty" in x["text"] for x in events))
 
+
+    async def test_ten_megabytes_of_output_paginate_without_duplication(self):
+        result = await self.runtime.invoke("run_command", {
+            "command": "python -c \"import sys; sys.stdout.write('x'*10485760)\"",
+            "yield_time_ms": 0,
+        })
+        eid = result["execution_id"]
+        await self.runtime.executions[eid]["task"]
+        cursor = 0
+        total = 0
+        seen = set()
+        while True:
+            page = self.runtime.output(eid, cursor, max_bytes=65536)
+            for chunk in page["chunks"]:
+                self.assertNotIn(chunk["cursor"], seen)
+                seen.add(chunk["cursor"])
+                total += len(chunk["text"].encode("utf-8"))
+            if not page["has_more"]:
+                break
+            self.assertGreater(page["cursor"], cursor)
+            cursor = page["cursor"]
+        self.assertEqual(total, 10485760)
+        self.assertFalse(page["truncated"])
+        self.assertEqual(page["state"], "completed")
+
     async def test_cwd_is_per_command_not_global(self):
         (self.root / "nested").mkdir()
         one, two = await asyncio.gather(
