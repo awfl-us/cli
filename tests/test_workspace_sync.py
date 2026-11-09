@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import unittest
@@ -71,6 +72,48 @@ class WorkspaceSyncTests(unittest.IsolatedAsyncioTestCase):
             cold.objects = dict(self.bucket.objects)
             self.assertEqual(await cold.sync_once(), 1)
             self.assertEqual((Path(cold_root) / "repo/src/readme.md").read_bytes(), b"updated from cli")
+
+    async def test_cold_restore_uses_bounded_parallelism(self):
+        for i in range(48):
+            self.bucket.objects[f"repo/file-{i:02}.txt"] = (str(100 + i), f"value-{i}".encode(), 0o644)
+        active = 0
+        peak = 0
+        original_download = self.bucket._download
+
+        async def delayed_download(session, token, rel, generation):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.015)
+                return await original_download(session, token, rel, generation)
+            finally:
+                active -= 1
+
+        with patch.object(self.bucket, "_download", side_effect=delayed_download):
+            self.assertEqual(await self.bucket.sync_once(), 48)
+        self.assertEqual(len(self.bucket.manifest), 48)
+        self.assertEqual(len(self.bucket._scan()), 48)
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, 16)
+
+    async def test_failed_transfer_preserves_successful_restore_manifest(self):
+        for i in range(20):
+            self.bucket.objects[f"data/file-{i:02}.txt"] = (str(100 + i), b"test", 0o644)
+        original_download = self.bucket._download
+
+        async def flaky_download(session, token, rel, generation):
+            if rel == "data/file-07.txt":
+                raise ConnectionError("transient GCS error")
+            return await original_download(session, token, rel, generation)
+
+        with patch.object(self.bucket, "_download", side_effect=flaky_download):
+            with self.assertRaisesRegex(RuntimeError, "1 object"):
+                await self.bucket.sync_once()
+        self.assertEqual(len(self.bucket.manifest), 19)
+        self.assertEqual(len(self.bucket._read_manifest()), 19)
+        self.assertEqual(await self.bucket.sync_once(), 1)
+        self.assertEqual(len(self.bucket.manifest), 20)
 
     async def test_local_delete_propagates_by_generation(self):
         self.bucket.objects["remove.txt"] = ("12", b"remove this", 0o644)
