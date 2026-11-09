@@ -9,6 +9,7 @@ from pathlib import Path
 
 from awfl.execution.runtime import Runtime
 from .callbacks import post_internal_callback
+from .output_batch import OutputBatchSink
 
 NATIVE_NAMES = {
     "RUN_COMMAND": "run_command",
@@ -74,29 +75,15 @@ async def handle_native(data, name, args, send_result):
                           "message": "Missing execution ID", "retryable": False}})
         return True
     params = {**args, "execution_id": execution_id}
-    send_lock = asyncio.Lock()
-    persisted = set()
-
-    async def persist(event):
-        if not callback_id:
-            return
-        async with send_lock:
-            ok = await post_internal_callback(callback_id, {
-                "_awfl_mcp_event": "output",
-                "execution_id": execution_id,
-                "chunk": event,
-            })
-            if ok:
-                persisted.add(event["cursor"])
+    sink = OutputBatchSink(callback_id, execution_id, post_internal_callback)
 
     try:
-        result = await runtime.invoke("run_command", params, on_chunk=persist)
+        result = await runtime.invoke("run_command", params, on_chunk=sink.append)
         item = runtime.executions[execution_id]
         await item["task"]
-        # Retry any transiently failed chunk deliveries before final callback.
-        for event in item["chunks"]:
-            if event["cursor"] not in persisted:
-                await persist(event)
+        # A completion callback may only be published once the bounded writer
+        # has finished durably persisting all acknowledged output events.
+        persisted = await sink.finish()
         finished = runtime.output(execution_id, len(item["chunks"]))
         await send_result({
             "execution_id": execution_id,
@@ -108,6 +95,13 @@ async def handle_native(data, name, args, send_result):
             "error": None,
         })
     except Exception as exc:
+        # Never leave a background output writer orphaned after a shell error.
+        # Preserve the original error and avoid falsely declaring the result
+        # complete before pending output has been flushed.
+        try:
+            await sink.finish()
+        except Exception:
+            pass
         await send_result({"execution_id": execution_id, "state": "failed",
                            "exit_code": None, "error": _public_error(exc)})
     return True
