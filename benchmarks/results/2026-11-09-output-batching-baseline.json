@@ -1,0 +1,19 @@
+{
+  "title": "AWFL MCP output-persistence baseline",
+  "captured_utc": "2026-11-09",
+  "source": "Prior live pre-pooling GKE run, as recorded in benchmarks/results/2026-11-09-pre-change.json and prior direct Firestore output document timestamps",
+  "test": "python -c \"import sys; sys.stdout.write('x'*262144)\"",
+  "output_bytes": 262144,
+  "output_events": 32,
+  "bytes_per_event": 8192,
+  "elapsed_first_to_last_persisted_ms": 3484,
+  "median_inter_event_gap_ms": 103,
+  "approx_persistence_rate_kib_per_sec": 73,
+  "notes": [
+    "This is the relevant historical pre-change baseline, not a newly measured after-revert run.",
+    "Each event currently triggers its own authenticated HTTP callback and Firestore transaction.",
+    "New batch path should retain each event as an individually addressable cursor document and give one transactional acknowledgment per batch.",
+    "Re-run identical command and capture first/last persisted timestamps after deployment; report median of repeated samples rather than single run.",
+    "The outlier 70-second MCP call after pooling showed end-to-end variance; avoid attributing all latency to the persistence pipeline."
+  ]
+}
