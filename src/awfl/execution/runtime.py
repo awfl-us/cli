@@ -6,6 +6,7 @@ events arrive over the existing SSE transport and reuse this runtime.
 from __future__ import annotations
 
 import asyncio
+import base64
 import codecs
 import fcntl
 import os
@@ -35,6 +36,7 @@ class Runtime:
         self.root.mkdir(parents=True, exist_ok=True)
         self.cwd = self.root  # Backward-compatible attribute; never mutated by commands.
         self.executions = {}
+        self.sessions = {}  # Optional named interactive sessions, scoped to this consumer.
         self.output_limit = output_limit
         self.concurrency_limit = concurrency_limit
 
@@ -84,6 +86,11 @@ class Runtime:
             cwd = self.path(args.get("cwd"))
             if not cwd.is_dir():
                 raise ValueError("Working directory does not exist")
+            session_id = args.get("session_id")
+            if session_id and session_id in self.sessions:
+                existing_id = self.sessions[session_id]
+                return {"execution_id": existing_id, "session_id": session_id,
+                        **self.output(existing_id, 0)}
             execution_id = args.get("execution_id") or uuid.uuid4().hex
             if not isinstance(execution_id, str) or not execution_id or len(execution_id) > 128:
                 raise ValueError("Invalid execution ID")
@@ -101,9 +108,12 @@ class Runtime:
             item = {
                 "state": "running", "exit_code": None, "chunks": [], "bytes": 0,
                 "truncated": False, "reason": None, "cwd": str(cwd),
-                "pty": use_pty, "changed": asyncio.Event(), "on_chunk": on_chunk,
+                "pty": use_pty, "session_id": session_id,
+                "changed": asyncio.Event(), "on_chunk": on_chunk,
             }
             self.executions[execution_id] = item
+            if session_id:
+                self.sessions[session_id] = execution_id
             # The existing project's user credentials are inherited. Internal
             # execution control variables must not be propagated to subprocesses.
             env = subprocess_credentials({
@@ -134,6 +144,8 @@ class Runtime:
                 item["task"] = asyncio.create_task(self._collect(item, timeout))
             except Exception:
                 del self.executions[execution_id]
+                if session_id:
+                    self.sessions.pop(session_id, None)
                 for descriptor in (master, slave):
                     if descriptor is not None:
                         os.close(descriptor)
@@ -144,7 +156,8 @@ class Runtime:
             if yield_ms:
                 await asyncio.wait({item["task"]}, timeout=yield_ms / 1000)
             result = self.output(execution_id, 0, max_bytes=args.get("max_output_bytes", 65536))
-            return {"execution_id": execution_id, "cwd": str(cwd), "pty": use_pty, **result}
+            return {"execution_id": execution_id, "cwd": str(cwd), "pty": use_pty,
+                    "session_id": session_id, **result}
         if name == "command_output":
             execution_id = args["execution_id"]
             cursor = args.get("cursor", 0)
@@ -180,8 +193,11 @@ class Runtime:
                 if chosen_signal not in ("SIGINT", "SIGTERM"):
                     raise ValueError("Only SIGINT and SIGTERM are supported")
                 self._signal(item, getattr(signal, chosen_signal))
-            if "input" in args:
-                data = args["input"].encode("utf-8")
+            if "input" in args or "input_base64" in args:
+                if "input" in args and "input_base64" in args:
+                    raise ValueError("Provide input or input_base64, not both")
+                data = (base64.b64decode(args["input_base64"], validate=True)
+                        if "input_base64" in args else args["input"].encode("utf-8"))
                 if item["pty"]:
                     os.write(item["pty_master"], data)
                 elif item["process"].stdin is not None:
