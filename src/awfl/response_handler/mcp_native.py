@@ -58,6 +58,7 @@ async def handle_native(data, name, args, send_result):
     if not callback_id or not await post_internal_callback(callback_id, {
         "_awfl_mcp_event": "claim",
         "consumer_id": os.environ.get("AWFL_CONSUMER_ID", ""),
+        "pod_uid": os.environ.get("AWFL_POD_UID", ""),
     }):
         return True
     if command != "run_command":
