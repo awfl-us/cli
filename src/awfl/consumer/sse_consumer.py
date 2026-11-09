@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 import aiohttp
 
 from awfl.auth import get_auth_headers
+from awfl.consumer.environment_info import describe_environment
 from awfl.response_handler import get_session
 from awfl.utils import get_api_origin, log_unique
 from awfl.events.workspace import resolve_project_id, get_or_create_workspace
@@ -417,6 +418,7 @@ async def consume_events_sse(
                                         "capabilities": ["shell", "pty", "command_input",
                                                          "apply_patch", "search_files",
                                                          "list_directory", "file_metadata"],
+                                        "environment": describe_environment(),
                                     },
                                     headers=hb_headers,
                                     timeout=aiohttp.ClientTimeout(total=8),
