@@ -27,6 +27,7 @@ from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
 from .mcp_tools import MCPRequestHandler
 from .idle_shutdown import IdleShutdown
+from .workspace_sync import WorkspaceSync
 
 # MCP calls may run for hours; the SSE reader must remain free to receive
 # cancellations and unrelated clients' commands. Tasks run in the SAME process.
@@ -136,6 +137,7 @@ async def _consume_events_sse_impl(
 
     # MCP uses the exact same project SSE connection and environment as CLI clients.
     mcp_handler = MCPRequestHandler() if scope == 'project' else None
+    workspace_sync = WorkspaceSync.from_environment() if scope == 'project' else None
     try:
         idle_seconds = int(os.getenv("AWFL_IDLE_TIMEOUT_SECONDS", "0"))
     except (TypeError, ValueError):
@@ -390,6 +392,11 @@ async def _consume_events_sse_impl(
                     reason = await _start_or_confirm_lock(project_id_for_lock)
                     if reason == "skipped-lock":
                         return "skipped-lock"  # benign skip
+                if workspace_sync and not workspace_sync.task:
+                    # Only the project-lock holder may hydrate/sync this workspace.
+                    # Do not accept commands until the initial restore completes.
+                    await workspace_sync.start()
+                    log_unique("💾 Project workspace restored; periodic GCS sync active")
 
             # Reset backoff when switching workspaces to be responsive
             if ws_id != last_ws_id:
@@ -656,6 +663,14 @@ async def _consume_events_sse_impl(
 
             except asyncio.CancelledError:
                 # Task canceled: exit cleanly
+                if workspace_sync and workspace_sync.task:
+                    try:
+                        if lost_lock:
+                            await workspace_sync.close(final_sync=False)
+                        else:
+                            await asyncio.wait_for(workspace_sync.close(), timeout=30)
+                    except Exception as error:
+                        log_unique(f"⚠️ Workspace final sync failed: {type(error).__name__}")
                 if scope == "project" and project_id_for_lock and leader_acquired:
                     try:
                         ok, released, conflict, _ = await release_lock(
@@ -690,6 +705,11 @@ async def _consume_events_sse_impl(
             await asyncio.sleep(0.2)
 
         # Not reached, but ensure lock release
+        if workspace_sync and workspace_sync.task:
+            try:
+                await workspace_sync.close()
+            except Exception as error:
+                log_unique(f"⚠️ Workspace final sync failed: {type(error).__name__}")
         if scope == "project" and project_id_for_lock and leader_acquired:
             try:
                 ok, released, conflict, _ = await release_lock(session_http, project_id=project_id_for_lock)

@@ -245,10 +245,15 @@ async def main():
 
     loop = asyncio.get_event_loop()
 
-    # Register signal handlers to ensure dev cleanup on SIGINT/SIGTERM
+    # Cloud Jobs receive SIGTERM during normal stop/eviction. Cancel the
+    # consumer cooperatively so its final GCS sync can finish before exit.
+    main_task = asyncio.current_task()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, _dev_cleanup)
+            if os.getenv("AWFL_NO_REPL") == "1" and os.getenv("AWFL_CONSUMER_TYPE") == "CLOUD":
+                loop.add_signal_handler(sig, main_task.cancel)
+            else:
+                loop.add_signal_handler(sig, _dev_cleanup)
         except NotImplementedError:
             # add_signal_handler not supported (e.g., on Windows); rely on finally
             pass
