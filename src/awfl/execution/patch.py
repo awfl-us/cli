@@ -173,6 +173,7 @@ def apply_patch(root: str | Path, patch: str, *, atomic: bool = True,
         expected[rel] = sha.lower()
 
     original = {}
+    original_modes = {}
     planned = {}
     results = []
     affected = set()
@@ -186,6 +187,7 @@ def apply_patch(root: str | Path, patch: str, *, atomic: bool = True,
         if rel in expected and (data is None or _digest(data) != expected[rel]):
             raise PatchConflict("Stale content hash for " + rel)
         original[path] = data
+        original_modes[path] = stat.S_IMODE(path.stat().st_mode) if data is not None else None
         return data
 
     for action in actions:
@@ -271,6 +273,10 @@ def apply_patch(root: str | Path, patch: str, *, atomic: bool = True,
             if value is None:
                 if path.exists():
                     path.unlink()
+            elif original.get(path) is None:
+                # link() is atomic create-only: never overwrite a file that
+                # appeared after preflight (including on an Add or Move).
+                os.link(staged[path], path, follow_symlinks=False)
             else:
                 os.replace(staged[path], path)
             changed.append(path)
@@ -285,6 +291,7 @@ def apply_patch(root: str | Path, patch: str, *, atomic: bool = True,
                 fd, backup = tempfile.mkstemp(prefix=".awfl-rollback-", dir=path.parent)
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(before)
+                os.chmod(backup, original_modes[path])
                 os.replace(backup, path)
         raise
     finally:
