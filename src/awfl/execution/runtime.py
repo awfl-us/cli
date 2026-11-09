@@ -19,6 +19,7 @@ import termios
 import uuid
 
 from .file_tools import read_file, write_file, search_files, list_directory
+from awfl.environment_info import describe_environment
 from awfl.consumer_credentials import subprocess_credentials
 from .patch import apply_patch
 
@@ -79,6 +80,7 @@ class Runtime:
         if name == "environment_status":
             return {
                 "state": "ready", "cwd": str(self.root),
+                "environment": describe_environment(),
                 "running": sum(x["state"] == "running" for x in self.executions.values()),
                 "capacity": self.concurrency_limit,
                 "capabilities": [
