@@ -26,6 +26,7 @@ from .leader_lock import (
 from .routing import forward_event
 from .debug import dbg, is_debug, is_debug_raw
 from .mcp_tools import MCPRequestHandler
+from .idle_shutdown import IdleShutdown
 
 # MCP calls may run for hours; the SSE reader must remain free to receive
 # cancellations and unrelated clients' commands. Tasks run in the SAME process.
@@ -69,9 +70,31 @@ async def _resolve_project_and_workspace(
     return project_id, ws_id
 
 
-async def consume_events_sse(
+async def consume_events_sse(stream_url=None, scope="session"):
+    """An intentional idle exit finishes a GKE Job successfully."""
+    idle_state = {"fired": False}
+    try:
+        result = await _consume_events_sse_impl(stream_url, scope, idle_state=idle_state)
+        return "idle-timeout" if idle_state["fired"] else result
+    except asyncio.CancelledError:
+        if not idle_state["fired"]:
+            raise
+        # Cancellation during reconnect bypasses the stream's lock release.
+        if scope == "project":
+            project_id = os.getenv("AWFL_PROJECT_ID")
+            if project_id:
+                try:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as http:
+                        await release_lock(http, project_id=project_id)
+                except Exception:
+                    pass
+        return "idle-timeout"
+
+
+async def _consume_events_sse_impl(
     stream_url: Optional[str] = None,
     scope: str = "session",  # "session" | "project"
+    *, idle_state=None,
 ):
     """Connect to the awfl-relay SSE stream (workspace-based) and forward events.
 
@@ -113,6 +136,42 @@ async def consume_events_sse(
 
     # MCP uses the exact same project SSE connection and environment as CLI clients.
     mcp_handler = MCPRequestHandler() if scope == 'project' else None
+    try:
+        idle_seconds = int(os.getenv("AWFL_IDLE_TIMEOUT_SECONDS", "0"))
+    except (TypeError, ValueError):
+        idle_seconds = 0
+    # Never add idle termination to interactive/local AWFL consumers.
+    if get_consumer_type() != "CLOUD" or scope != "project":
+        idle_seconds = 0
+    active_events = 0
+
+    def _busy():
+        if active_events or any(not task.done() for task in _MCP_INFLIGHT):
+            return True
+        if mcp_handler is None:
+            return False
+        if any(not task.done() for task in mcp_handler.tasks):
+            return True
+        return any(item.get("state") == "running"
+                   for item in mcp_handler.runtime.executions.values())
+
+    idle_controller = IdleShutdown(idle_seconds, is_busy=_busy) if idle_seconds > 0 else None
+    if idle_controller:
+        parent_task = asyncio.current_task()
+
+        async def _idle_shutdown_watchdog():
+            while True:
+                await asyncio.sleep(min(5, max(0.1, idle_seconds / 4)))
+                if idle_controller.is_due():
+                    log_unique(f"🛑 Cloud consumer idle for {idle_seconds}s; exiting.")
+                    if idle_state is not None:
+                        idle_state["fired"] = True
+                    parent_task.cancel()
+                    return
+
+        idle_monitor = asyncio.create_task(_idle_shutdown_watchdog(), name="awfl-idle-shutdown")
+        parent_task.add_done_callback(lambda _: idle_monitor.cancel())
+
 
     last_ws_id: Optional[str] = None
     last_session_id: Optional[str] = None
@@ -514,10 +573,22 @@ async def consume_events_sse(
                                     )
                                     continue
 
+                                # Heartbeats, stream traffic and lease refreshes are NOT activity.
+                                if (idle_controller is not None and isinstance(obj, dict) and
+                                        evt_type != "mcp_tool_result" and
+                                        (evt_type == "mcp_tool_call" or obj.get("tool_call") or obj.get("mcp"))):
+                                    idle_controller.touch()
+
                                 # Forward to CLI response handler according to scope
                                 try:
                                     if isinstance(obj, dict):
-                                        await _forward_sse_event(obj, evt_type, scope=scope, mcp_handler=mcp_handler)
+                                        if scope == "project":
+                                            active_events += 1
+                                        try:
+                                            await _forward_sse_event(obj, evt_type, scope=scope, mcp_handler=mcp_handler)
+                                        finally:
+                                            if scope == "project":
+                                                active_events -= 1
                                     else:
                                         # Non-dict payloads are unexpected; log and skip forwarding to avoid attribute errors downstream
                                         kind = type(obj).__name__
@@ -603,7 +674,7 @@ async def consume_events_sse(
                 if scope == "project" and lost_lock:
                     return "lost-lock"
                 log_unique("🛑 SSE consumer canceled; closing.")
-                return "cancelled"
+                return "idle-timeout" if idle_state and idle_state.get("fired") else "cancelled"
             except asyncio.TimeoutError:
                 # Socket read timeout (likely sleep/half-open). Reconnect.
                 log_unique("⌛ SSE read timed out; reconnecting to recover from possible sleep/half-open state...")

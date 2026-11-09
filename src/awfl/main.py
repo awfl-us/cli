@@ -183,6 +183,11 @@ def _attach_crash_on_consumer_exit(task: asyncio.Task, name: str, evt: asyncio.E
             evt.set()
             return
 
+        # Deliberate GKE idle timeout exits the job cleanly.
+        if name == "project" and status == "idle-timeout":
+            evt.set()
+            return
+
         # Project consumer: only benign when lock was skipped or task was cancelled; otherwise fatal
         if name == "project":
             if status in ("skipped-lock", "cancelled"):
@@ -278,6 +283,14 @@ async def main():
         log_unique("🧪 Running in headless mode (no REPL): SSE consumers active.")
         try:
             await consumer_shutdown_evt.wait()
+            try:
+                idle_exit = (project_consumer.done() and not project_consumer.cancelled()
+                             and project_consumer.result() == "idle-timeout")
+            except Exception:
+                idle_exit = False
+            if idle_exit:
+                log_unique("🛑 Idle timeout reached; exiting GKE consumer normally.")
+                return
             log_unique("❌ Event stream consumer stopped. Exiting CLI so your supervisor can restart it.")
             # Best-effort cancel the other consumer (if still running)
             for t in (project_consumer, session_consumer):
