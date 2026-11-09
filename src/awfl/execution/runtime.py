@@ -18,6 +18,7 @@ import termios
 import uuid
 
 from .file_tools import read_file, write_file, search_files, list_directory
+from awfl.consumer_credentials import subprocess_credentials
 from .patch import apply_patch
 
 
@@ -105,7 +106,9 @@ class Runtime:
             self.executions[execution_id] = item
             # The existing project's user credentials are inherited. Internal
             # execution control variables must not be propagated to subprocesses.
-            env = {k: v for k, v in os.environ.items() if not k.startswith("AWFL_EXECUTION_")}
+            env = subprocess_credentials({
+                k: v for k, v in os.environ.items() if not k.startswith("AWFL_EXECUTION_")
+            })
             master = slave = None
             try:
                 if use_pty:
