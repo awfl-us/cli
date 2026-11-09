@@ -19,7 +19,7 @@ import termios
 import uuid
 
 from .file_tools import read_file, write_file, search_files, list_directory
-from awfl.consumer.environment_info import describe_environment
+from awfl.environment_info import describe_environment
 from awfl.consumer_credentials import subprocess_credentials
 from .patch import apply_patch
 
