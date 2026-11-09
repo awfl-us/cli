@@ -89,3 +89,23 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def subprocess_credentials(base=None):
+    """Refresh GitHub credentials for each spawned tool process.
+
+    A background refresher cannot mutate its already-running parent's
+    environment, so tools must read the rotated token file on each spawn.
+    Git's credential helper also uses this same file.
+    """
+    env = dict(base if base is not None else os.environ)
+    path = env.get("AWFL_GITHUB_TOKEN_FILE")
+    if path:
+        try:
+            token = pathlib.Path(path).read_text().strip()
+        except (OSError, UnicodeError):
+            token = ""
+        if token:
+            env["GITHUB_TOKEN"] = token
+            env["GH_TOKEN"] = token
+    return env

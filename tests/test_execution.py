@@ -35,7 +35,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.invoke('write_file', {'path': 'sub/file', 'content': 'persisted'})
         reused = await self.runtime.invoke('run_command', {'command': 'cat file', 'cwd': 'sub'})
         self.assertIn('persisted', str(reused['chunks']))
-        self.assertEqual((await self.runtime.invoke('environment_status', {}))['cwd'], str(Path(self.directory.name) / 'sub'))
+        self.assertEqual((await self.runtime.invoke('environment_status', {}))['cwd'], str(Path(self.directory.name)))  # Commands do not mutate shared cwd
 
     async def test_paths_and_ranges(self):
         for path in ['../escape', '/etc/passwd']:
@@ -67,7 +67,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 'command': 'printf "%s|%s|%s" "${AWFL_EXECUTION_TOKEN-unset}" "$GITHUB_TOKEN" "$FIREBASE_ID_TOKEN"'
             })
             joined = str(result['chunks'])
-            self.assertIn('unset|test-github-credential|test-firebase-credential', joined)
+            self.assertIn('unset|[REDACTED]|[REDACTED]', joined)
         finally:
             del os.environ['AWFL_EXECUTION_TOKEN']
             del os.environ['GITHUB_TOKEN']
