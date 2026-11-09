@@ -165,29 +165,37 @@ def _matches_glob(relative, glob):
                (g.startswith("**/") and fnmatch.fnmatch(relative, g[3:])) for g in globs)
 
 
-def _ignored(root: Path, file: Path) -> bool:
-    try:
-        result = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(file)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                timeout=2, check=False)
-        return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
 def _walk(root: Path, *, recursive=True, include_hidden=False, respect_gitignore=True):
+    # Ask Git once instead of running git check-ignore for every directory and
+    # file. Includes untracked, non-ignored files; a non-repository falls back
+    # to a normal directory walk.
+    if respect_gitignore and recursive:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "ls-files", "--cached", "--others",
+                 "--exclude-standard", "-z"], capture_output=True,
+                timeout=10, check=False,
+            )
+            if result.returncode == 0:
+                for raw in sorted(p for p in result.stdout.split(b"\0") if p):
+                    relative = os.fsdecode(raw)
+                    path = root / relative
+                    if not include_hidden and any(p.startswith(".") for p in Path(relative).parts):
+                        continue
+                    if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(root):
+                        yield path
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     for current, dirs, files in os.walk(root, followlinks=False):
         current_path = Path(current)
         dirs[:] = sorted(d for d in dirs if
-            (include_hidden or not d.startswith(".")) and d != ".git" and
-            not (respect_gitignore and _ignored(root, current_path / d)))
+            (include_hidden or not d.startswith(".")) and d != ".git")
         for name in sorted(files):
             if not include_hidden and name.startswith("."):
                 continue
             path = current_path / name
-            if path.is_symlink() or (respect_gitignore and _ignored(root, path)):
-                continue
-            if path.is_file():
+            if not path.is_symlink() and path.is_file():
                 yield path
         if not recursive:
             break
