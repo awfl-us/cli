@@ -24,8 +24,17 @@ from .patch import apply_patch
 
 
 def child_limits():
-    resource.setrlimit(resource.RLIMIT_NPROC, (256, 256))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
+    # Linux RLIMIT_NPROC counts threads and is shared across the same host UID,
+    # not merely this one GKE pod. A 256-task limit prevents Chromium/Playwright
+    # from starting (pthread_create EAGAIN), even when pod pids.current is low.
+    # Keep a bounded ceiling while allowing a realistic browser process tree.
+    try:
+        task_limit = int(os.getenv("AWFL_EXEC_SUBPROCESS_MAX_TASKS", "2048"))
+    except (TypeError, ValueError):
+        task_limit = 2048
+    task_limit = max(512, min(task_limit, 4096))
+    resource.setrlimit(resource.RLIMIT_NPROC, (task_limit, task_limit))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (4096, 4096))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_FSIZE, (256 * 1024 * 1024, 256 * 1024 * 1024))
 
