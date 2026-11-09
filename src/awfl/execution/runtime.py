@@ -1,12 +1,24 @@
-"""Tool implementation; invoked by the SSE consumer, never by the API process."""
+"""The shared AWFL project's asynchronous shell and filesystem runtime.
+
+No separate GKE Job, daemon or tool backend is created. Project MCP tool
+events arrive over the existing SSE transport and reuse this runtime.
+"""
+from __future__ import annotations
+
 import asyncio
 import codecs
+import fcntl
 import os
 from pathlib import Path
-import signal
+import pty
 import resource
-import time
+import signal
+import struct
+import termios
 import uuid
+
+from .file_tools import read_file, write_file, search_files, list_directory
+from .patch import apply_patch
 
 
 def child_limits():
@@ -17,24 +29,25 @@ def child_limits():
 
 
 class Runtime:
-    def __init__(self, root, *, output_limit=1024 * 1024):
+    def __init__(self, root, *, output_limit=32 * 1024 * 1024, concurrency_limit=4):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        self.cwd = self.root
+        self.cwd = self.root  # Backward-compatible attribute; never mutated by commands.
         self.executions = {}
         self.output_limit = output_limit
+        self.concurrency_limit = concurrency_limit
 
     def path(self, value=None):
-        p = (self.cwd / (value or '.')).resolve()
+        p = (self.root / (value or ".")).resolve()
         if not p.is_relative_to(self.root):
-            raise ValueError('Path must remain inside the workspace')
+            raise ValueError("Path must remain inside the workspace")
         return p
 
     def open_file(self, value, flags, create_parents=False):
         path = self.path(value)
         parts = path.relative_to(self.root).parts
         if not parts:
-            raise ValueError('Expected file path')
+            raise ValueError("Expected file path")
         directory = os.open(self.root, os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             for part in parts[:-1]:
@@ -50,122 +63,281 @@ class Runtime:
         finally:
             os.close(directory)
 
-    async def invoke(self, name, args):
-        if name == 'environment_status':
-            return {'state': 'ready', 'cwd': str(self.cwd), 'running': sum(x['state'] == 'running' for x in self.executions.values()),
-                    'capabilities': ['shell', 'python', 'node', 'git', 'playwright', 'chromium', 'https']}
-        if name == 'run_command':
-            if sum(x['state'] == 'running' for x in self.executions.values()) >= 4:
-                raise ValueError('Concurrent command limit (4) reached')
+    async def invoke(self, name, args, *, on_chunk=None):
+        if name == "environment_status":
+            return {
+                "state": "ready", "cwd": str(self.root),
+                "running": sum(x["state"] == "running" for x in self.executions.values()),
+                "capacity": self.concurrency_limit,
+                "capabilities": [
+                    "shell", "command_input", "command_output", "process_groups",
+                    "pty", "file_patch", "file_search", "file_metadata", "python",
+                    "node", "git", "playwright", "chromium", "https",
+                ],
+            }
+        if name == "run_command":
+            if sum(x["state"] == "running" for x in self.executions.values()) >= self.concurrency_limit:
+                raise ValueError("Concurrent command limit reached")
             if len(self.executions) >= 128:
-                raise ValueError('Workspace execution limit (128) reached; create a new workspace')
-            cwd = self.path(args.get('cwd'))
+                raise ValueError("Workspace execution limit (128) reached")
+            cwd = self.path(args.get("cwd"))
             if not cwd.is_dir():
-                raise ValueError('Working directory does not exist')
-            self.cwd = cwd  # Explicit cwd persists; shell-local cd/export does not.
-            execution_id = uuid.uuid4().hex
-            item = {'state': 'running', 'exit_code': None, 'chunks': [], 'bytes': 0, 'truncated': False, 'reason': None}
+                raise ValueError("Working directory does not exist")
+            execution_id = args.get("execution_id") or uuid.uuid4().hex
+            if not isinstance(execution_id, str) or not execution_id or len(execution_id) > 128:
+                raise ValueError("Invalid execution ID")
+            if execution_id in self.executions:
+                return {"execution_id": execution_id, **self.output(execution_id, 0)}
+            timeout = args.get("timeout_ms")
+            if timeout is not None:
+                timeout = timeout / 1000
+            else:
+                timeout = args.get("timeout", 120)
+            if timeout is not None and not 0 < timeout <= 3600:
+                raise ValueError("Command timeout out of range")
+            interactive = bool(args.get("interactive", False) or args.get("pty", False))
+            use_pty = bool(args.get("pty", False))
+            item = {
+                "state": "running", "exit_code": None, "chunks": [], "bytes": 0,
+                "truncated": False, "reason": None, "cwd": str(cwd),
+                "pty": use_pty, "changed": asyncio.Event(), "on_chunk": on_chunk,
+            }
             self.executions[execution_id] = item
-            # MCP commands run as this owner's regular AWFL cloud consumer.
-            # Preserve its GitHub/Firebase/GCP credentials and other configured
-            # environment variables, but do not pass the private MCP callback
-            # capability to child shells.
-            env = {k: v for k, v in os.environ.items() if not k.startswith('AWFL_EXECUTION_')}
+            # The existing project's user credentials are inherited. Internal
+            # execution control variables must not be propagated to subprocesses.
+            env = {k: v for k, v in os.environ.items() if not k.startswith("AWFL_EXECUTION_")}
+            master = slave = None
             try:
-                item['process'] = await asyncio.create_subprocess_exec(
-                    '/bin/bash', '-c', args['command'], cwd=cwd, env=env,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True, preexec_fn=child_limits)
+                if use_pty:
+                    master, slave = pty.openpty()
+                    self._set_pty_size(master, args.get("cols", 80), args.get("rows", 24))
+                    process = await asyncio.create_subprocess_exec(
+                        "/bin/bash", "-c", args["command"], cwd=cwd, env=env,
+                        stdin=slave, stdout=slave, stderr=slave,
+                        start_new_session=True, preexec_fn=child_limits,
+                    )
+                    os.close(slave)
+                    slave = None
+                    item["pty_master"] = master
+                else:
+                    process = await asyncio.create_subprocess_exec(
+                        "/bin/bash", "-c", args["command"], cwd=cwd, env=env,
+                        stdin=asyncio.subprocess.PIPE if interactive else asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        start_new_session=True, preexec_fn=child_limits,
+                    )
+                item["process"] = process
+                item["task"] = asyncio.create_task(self._collect(item, timeout))
             except Exception:
                 del self.executions[execution_id]
+                for descriptor in (master, slave):
+                    if descriptor is not None:
+                        os.close(descriptor)
                 raise
-            item['task'] = asyncio.create_task(self._collect(item, args.get('timeout', 120)))
-            await asyncio.wait({item['task']}, timeout=0.5)
-            return {'execution_id': execution_id, **self.output(execution_id, 0)}
-        if name == 'command_output':
-            return self.output(args['execution_id'], args.get('cursor', 0))
-        if name == 'command_cancel':
-            item = self.executions[args['execution_id']]
-            if item['state'] == 'running':
-                item['reason'] = 'cancelled'
-                self._kill(item)
-                await item['task']
-            return self.output(args['execution_id'], args.get('cursor', 0))
-        if name == 'read_file':
-            path = self.path(args['path'])
-            # O_NOFOLLOW also prevents a final-component symlink swap.
-            fd = self.open_file(args['path'], os.O_RDONLY)
-            with os.fdopen(fd, 'rb') as f:
-                import stat
-                if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                    raise ValueError('Only regular files can be read')
-                f.seek(args.get('offset', 0))
-                size = args.get('max_bytes', 32768)
-                data = f.read(size + 1)
-            return {'content': data[:size].decode('utf-8', errors='replace'),
-                    'next_offset': args.get('offset', 0) + min(len(data), size), 'truncated': len(data) > size}
-        if name == 'write_file':
-            path = self.path(args['path'])
-            fd = self.open_file(args['path'], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, create_parents=True)
-            with os.fdopen(fd, 'w') as f:
-                f.write(args['content'])
-            return {'path': str(path), 'bytes': len(args['content'].encode())}
-        raise ValueError('Unknown tool')
+            yield_ms = args.get("yield_time_ms", 500)
+            if not isinstance(yield_ms, int) or not 0 <= yield_ms <= 60000:
+                raise ValueError("yield_time_ms out of range")
+            if yield_ms:
+                await asyncio.wait({item["task"]}, timeout=yield_ms / 1000)
+            result = self.output(execution_id, 0, max_bytes=args.get("max_output_bytes", 65536))
+            return {"execution_id": execution_id, "cwd": str(cwd), "pty": use_pty, **result}
+        if name == "command_output":
+            execution_id = args["execution_id"]
+            cursor = args.get("cursor", 0)
+            item = self.executions[execution_id]
+            if cursor == len(item["chunks"]) and item["state"] == "running" and args.get("wait_ms", 0):
+                item["changed"].clear()
+                # Avoid missed wakeups when a chunk lands just before clear.
+                if cursor == len(item["chunks"]) and item["state"] == "running":
+                    try:
+                        await asyncio.wait_for(item["changed"].wait(), args["wait_ms"] / 1000)
+                    except asyncio.TimeoutError:
+                        pass
+            return {"execution_id": execution_id, **self.output(
+                execution_id, cursor, max_bytes=args.get("max_bytes", 65536))}
+        if name == "command_cancel":
+            item = self.executions[args["execution_id"]]
+            if item["state"] == "running":
+                item["reason"] = "cancelled"
+                self._signal(item, signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(asyncio.shield(item["task"]), timeout=2)
+                except asyncio.TimeoutError:
+                    self._kill(item)
+                    await item["task"]
+            return {"execution_id": args["execution_id"], **self.output(
+                args["execution_id"], args.get("cursor", 0))}
+        if name == "command_input":
+            item = self.executions[args["execution_id"]]
+            if item["state"] != "running":
+                raise ValueError("Execution is not running")
+            chosen_signal = args.get("signal")
+            if chosen_signal:
+                if chosen_signal not in ("SIGINT", "SIGTERM"):
+                    raise ValueError("Only SIGINT and SIGTERM are supported")
+                self._signal(item, getattr(signal, chosen_signal))
+            if "input" in args:
+                data = args["input"].encode("utf-8")
+                if item["pty"]:
+                    os.write(item["pty_master"], data)
+                elif item["process"].stdin is not None:
+                    item["process"].stdin.write(data)
+                    await item["process"].stdin.drain()
+                else:
+                    raise ValueError("Command was not started in interactive mode")
+            if args.get("eof"):
+                if item["pty"]:
+                    os.write(item["pty_master"], b"\x04")
+                elif item["process"].stdin is not None:
+                    item["process"].stdin.close()
+            if item["pty"] and ("cols" in args or "rows" in args):
+                self._set_pty_size(item["pty_master"], args.get("cols", 80), args.get("rows", 24))
+            return {"execution_id": args["execution_id"], "state": item["state"], "accepted": True}
+        if name == "read_file":
+            return await asyncio.to_thread(read_file, self, args)
+        if name == "write_file":
+            return await asyncio.to_thread(write_file, self, args)
+        if name == "apply_patch":
+            root = self.path(args.get("cwd"))
+            return await asyncio.to_thread(
+                apply_patch, root, args["patch"], atomic=args.get("atomic", True),
+                expected_hashes=args.get("expected_hashes"))
+        if name == "search_files":
+            return await asyncio.to_thread(search_files, self, args)
+        if name == "list_directory":
+            return await asyncio.to_thread(list_directory, self, args)
+        raise ValueError("Unknown tool")
 
-    def _kill(self, item):
+    @staticmethod
+    def _set_pty_size(descriptor, cols, rows):
+        if not isinstance(cols, int) or not isinstance(rows, int) or not 1 <= cols <= 1000 or not 1 <= rows <= 1000:
+            raise ValueError("PTY dimensions out of range")
+        fcntl.ioctl(descriptor, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+    @staticmethod
+    def _signal(item, signum):
         try:
-            os.killpg(item['process'].pid, signal.SIGKILL)
+            os.killpg(item["process"].pid, signum)
         except ProcessLookupError:
             pass
 
+    def _kill(self, item):
+        self._signal(item, signal.SIGKILL)
+
+    async def _append_chunk(self, item, stream, text):
+        if not text:
+            return
+        if item["bytes"] >= self.output_limit:
+            item["truncated"] = True
+            item["reason"] = "output_limit"
+            self._kill(item)
+            return
+        raw = text.encode("utf-8")
+        available = self.output_limit - item["bytes"]
+        clipped = raw[:available].decode("utf-8", errors="ignore")
+        if clipped:
+            cursor = len(item["chunks"]) + 1
+            event = {"cursor": cursor, "stream": stream, "text": clipped}
+            item["chunks"].append(event)
+            item["bytes"] += len(clipped.encode("utf-8"))
+            item["changed"].set()
+            if item["on_chunk"]:
+                # The callback persists output on the existing MCP request. Its
+                # errors must not prevent subprocess I/O from draining.
+                try:
+                    await item["on_chunk"](event)
+                except Exception:
+                    pass
+        if len(raw) > available:
+            item["truncated"] = True
+            item["reason"] = "output_limit"
+            self._kill(item)
+
     async def _collect(self, item, timeout):
         async def drain(stream, label):
-            decoder = codecs.getincrementaldecoder('utf-8')('replace')
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
             while True:
                 data = await stream.read(8192)
                 if not data:
-                    tail = decoder.decode(b'', final=True)
-                    if tail:
-                        item['chunks'].append({'stream': label, 'text': tail})
+                    await self._append_chunk(item, label, decoder.decode(b"", final=True))
                     return
-                available = max(0, self.output_limit - item['bytes'])
-                if available:
-                    item['chunks'].append({'stream': label, 'text': decoder.decode(data[:available])})
-                    item['bytes'] += min(len(data), available)
-                if len(data) > available:
-                    item['truncated'] = True
-                    item['reason'] = 'output_limit'
-                    self._kill(item)
+                await self._append_chunk(item, label, decoder.decode(data))
 
-        tasks = [asyncio.create_task(drain(item['process'].stdout, 'stdout')),
-                 asyncio.create_task(drain(item['process'].stderr, 'stderr'))]
+        async def drain_pty(master):
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
+            while True:
+                try:
+                    data = await asyncio.to_thread(os.read, master, 8192)
+                except OSError:
+                    data = b""
+                if not data:
+                    await self._append_chunk(item, "pty", decoder.decode(b"", final=True))
+                    return
+                await self._append_chunk(item, "pty", decoder.decode(data))
+
+        if item["pty"]:
+            tasks = [asyncio.create_task(drain_pty(item["pty_master"]))]
+        else:
+            tasks = [
+                asyncio.create_task(drain(item["process"].stdout, "stdout")),
+                asyncio.create_task(drain(item["process"].stderr, "stderr")),
+            ]
         try:
-            async with asyncio.timeout(timeout):
-                await item['process'].wait()
-                # Kill background children after the foreground shell exits.
-                self._kill(item)
-                await asyncio.gather(*tasks)
+            if timeout is None:
+                await item["process"].wait()
+            else:
+                async with asyncio.timeout(timeout):
+                    await item["process"].wait()
+            self._kill(item)  # Kill any background children left by the shell.
+            await asyncio.gather(*tasks)
         except TimeoutError:
-            item['reason'] = 'timeout'
+            item["reason"] = "timeout"
             self._kill(item)
-            await item['process'].wait()
+            await item["process"].wait()
         finally:
             self._kill(item)
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            item['exit_code'] = item['process'].returncode
-            item['state'] = 'completed'
+            if item.get("pty_master") is not None:
+                os.close(item["pty_master"])
+            item["exit_code"] = item["process"].returncode
+            item["state"] = ("timed_out" if item["reason"] == "timeout"
+                             else "cancelled" if item["reason"] == "cancelled"
+                             else "completed")
+            item["changed"].set()
 
-    def output(self, execution_id, cursor):
+    def output(self, execution_id, cursor, *, max_bytes=65536):
         item = self.executions[execution_id]
-        if cursor < 0 or cursor > len(item['chunks']):
-            raise ValueError('Invalid output cursor')
-        chunks = item['chunks'][cursor:cursor + 4]
-        return {k: item[k] for k in ['state', 'exit_code', 'truncated', 'reason']} | {
-            'chunks': chunks, 'next_cursor': cursor + len(chunks), 'has_more': cursor + len(chunks) < len(item['chunks'])}
+        if not isinstance(cursor, int) or cursor < 0 or cursor > len(item["chunks"]):
+            raise ValueError("Invalid output cursor")
+        if not isinstance(max_bytes, int) or not 1 <= max_bytes <= 1024 * 1024:
+            raise ValueError("max_bytes out of range")
+        chunks = []
+        used = 0
+        for event in item["chunks"][cursor:]:
+            size = len(event["text"].encode("utf-8"))
+            if chunks and used + size > max_bytes:
+                break
+            chunks.append(event)
+            used += size
+            if len(chunks) >= 128:
+                break
+        next_cursor = cursor + len(chunks)
+        return {
+            "state": item["state"], "exit_code": item["exit_code"],
+            "truncated": item["truncated"], "reason": item["reason"],
+            "chunks": chunks, "next_cursor": next_cursor, "cursor": next_cursor,
+            "has_more": next_cursor < len(item["chunks"]),
+            "cwd": item["cwd"], "pty": item["pty"],
+            "stdout": "".join(x["text"] for x in chunks if x["stream"] == "stdout"),
+            "stderr": "".join(x["text"] for x in chunks if x["stream"] == "stderr"),
+            "error": None,
+        }
 
     async def close(self):
         for item in self.executions.values():
             self._kill(item)
-        await asyncio.gather(*(x['task'] for x in self.executions.values()), return_exceptions=True)
+        await asyncio.gather(*(x["task"] for x in self.executions.values()), return_exceptions=True)
