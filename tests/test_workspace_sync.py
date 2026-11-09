@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from aiohttp import web
+import aiohttp
 
 from awfl.consumer.workspace_sync import WorkspaceSync, allowed_file, _safe_target
 
@@ -138,6 +140,37 @@ class WorkspaceSyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_cloud_only(self):
         with patch.dict(os.environ, {"AWFL_CONSUMER_TYPE": "LOCAL", "AWFL_WORKSPACE_GCS_BUCKET": "test"}):
             self.assertIsNone(WorkspaceSync.from_environment())
+
+    async def test_download_reads_every_chunk_not_only_first(self):
+        # A network StreamReader.read(n) can legally return fewer than n bytes.
+        # Split a response in two writes to test the actual streaming semantics.
+        async def handler(request):
+            resp = web.StreamResponse(status=200)
+            await resp.prepare(request)
+            await resp.write(b"first-")
+            import asyncio
+            await asyncio.sleep(0.05)
+            await resp.write(b"second")
+            await resp.write_eof()
+            return resp
+
+        app = web.Application()
+        app.router.add_get('/download/storage/v1/b/test-bucket/o/test', handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            self.bucket.bucket = 'test-bucket'
+            self.bucket.prefix = ''
+            with patch.object(self.bucket, '_object_url', return_value=
+                              f'http://127.0.0.1:{port}/storage/v1/b/test-bucket/o/test'):
+                async with aiohttp.ClientSession() as session:
+                    data = await WorkspaceSync._download(self.bucket, session, 'token', 'test', '123')
+            self.assertEqual(data, b'first-second')
+        finally:
+            await runner.cleanup()
 
 
 if __name__ == "__main__":
