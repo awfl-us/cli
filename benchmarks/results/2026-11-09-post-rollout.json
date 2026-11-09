@@ -1,0 +1,149 @@
+{
+  "benchmark": "awfl-mcp-callback-latency-v1",
+  "captured_on": "2026-11-09",
+  "environment": "Fresh GKE consumer using deployed awfl-us/cli@ab63a88c2aa65c217364784cf027c26d542f4c75",
+  "workspace_id": "58c0e679e357b1eb25e5af3ccfed2931",
+  "run_command": "python benchmarks/mcp_callback_latency.py (installed package, no PYTHONPATH override)",
+  "local_callback": {
+    "calls": 30,
+    "connections": 1,
+    "median_ms": 0.394,
+    "min_ms": 0.342,
+    "max_ms": 69.487,
+    "p95_ms": 1.192,
+    "samples_ms": [
+      69.487,
+      0.777,
+      0.624,
+      0.601,
+      0.518,
+      0.439,
+      0.451,
+      0.496,
+      0.396,
+      0.362,
+      0.344,
+      0.41,
+      0.356,
+      0.383,
+      0.361,
+      0.355,
+      0.388,
+      0.404,
+      0.369,
+      0.413,
+      0.382,
+      0.382,
+      0.342,
+      0.39,
+      0.453,
+      1.192,
+      0.566,
+      0.375,
+      0.348,
+      0.392
+    ]
+  },
+  "cloud_run_health_fresh_session": {
+    "n": 20,
+    "median_ms": 30.165,
+    "min_ms": 23.437,
+    "max_ms": 65.619,
+    "p95_ms": 65.619,
+    "samples_ms": [
+      35.935,
+      43.071,
+      23.437,
+      40.231,
+      25.226,
+      31.067,
+      25.983,
+      38.437,
+      29.893,
+      28.798,
+      30.138,
+      36.792,
+      30.191,
+      65.619,
+      29.426,
+      29.598,
+      29.75,
+      30.338,
+      27.642,
+      31.147
+    ]
+  },
+  "cloud_run_health_reused_session": {
+    "n": 20,
+    "median_ms": 12.949,
+    "min_ms": 10.748,
+    "max_ms": 138.923,
+    "p95_ms": 138.923,
+    "samples_ms": [
+      138.923,
+      16.833,
+      13.857,
+      13.114,
+      12.051,
+      10.928,
+      12.312,
+      11.435,
+      12.487,
+      11.997,
+      11.573,
+      15.015,
+      12.784,
+      14.117,
+      13.522,
+      13.81,
+      12.115,
+      13.255,
+      10.748,
+      16.291
+    ]
+  },
+  "warm_mcp_echo": {
+    "n": 8,
+    "median_ms": 2759.5,
+    "range_ms": [
+      1835,
+      4756
+    ],
+    "samples_ms": [
+      2864,
+      3626,
+      2655,
+      1835,
+      4756,
+      1859,
+      4062,
+      1867
+    ],
+    "all_exit_zero": true,
+    "prior_before_median_ms": 2378
+  },
+  "output_256kb": {
+    "calls": [
+      {
+        "latency_ms": 70427,
+        "state": "completed",
+        "exit_code": 0,
+        "description": "first post-rollout output test; extreme outlier"
+      },
+      {
+        "latency_ms_approx": 3305,
+        "state": "completed",
+        "exit_code": 0,
+        "description": "async submission followed by output poll; approximate sum of tool calls"
+      },
+      {
+        "latency_ms": 5649,
+        "state": "completed",
+        "exit_code": 0,
+        "description": "third output test"
+      }
+    ],
+    "prior_before_latency_ms": 6930
+  },
+  "notes": "Backend stage timings after rollout were not available: the injected GCP token returned HTTP 401 when the pending Firestore query executed. E2E samples use different project-scoped consumers and show high variance; do not claim measured improvement in full MCP latency from this dataset."
+}
