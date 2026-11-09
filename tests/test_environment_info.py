@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from awfl.consumer.environment_info import describe_environment
+from awfl.environment_info import describe_environment
 
 
 class EnvironmentInfoTests(unittest.TestCase):
