@@ -74,5 +74,7 @@ def describe_environment() -> dict:
             "python": bool(shutil.which("python") or shutil.which("python3")),
             "node": bool(shutil.which("node")),
             "chromium_playwright": playwright_available,
+            "java": bool(shutil.which("java")),
+            "sbt": bool(shutil.which("sbt")),
         },
     }
