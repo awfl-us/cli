@@ -49,8 +49,15 @@ class EnvironmentInfoTests(unittest.TestCase):
     def test_environment_reports_tools_as_booleans(self):
         with patch.dict(os.environ, {}, clear=True):
             tools = describe_environment()['tools']
-        self.assertEqual(set(tools), {'git', 'gcloud', 'python', 'node', 'chromium_playwright'})
+        self.assertEqual(set(tools), {'git', 'gcloud', 'python', 'node', 'chromium_playwright', 'java', 'sbt'})
         self.assertTrue(all(isinstance(value, bool) for value in tools.values()))
+
+    def test_scala_tooling_capabilities_are_detected_without_running_tools(self):
+        with patch('awfl.environment_info.shutil.which', side_effect=lambda name: '/usr/bin/' + name if name in ('java', 'sbt') else None):
+            tools = describe_environment()['tools']
+        self.assertTrue(tools['java'])
+        self.assertTrue(tools['sbt'])
+        self.assertFalse(tools['node'])
 
 
 if __name__ == '__main__':
