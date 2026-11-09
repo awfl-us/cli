@@ -1,10 +1,39 @@
 import os
 import asyncio
+from weakref import WeakKeyDictionary
 
 import aiohttp
 
 from awfl.utils import get_api_origin
 from awfl.auth import get_auth_headers
+
+
+# Keep callback HTTP connections alive across short-lived MCP operations.
+# Cache is scoped to the running event loop: aiohttp sessions cannot safely
+# cross loops. Headers are NOT cached, so refreshed Firebase credentials are
+# resolved for each callback. The CLI closes these sessions at shutdown.
+_callback_sessions = WeakKeyDictionary()
+
+
+def _callback_http_session():
+    loop = asyncio.get_running_loop()
+    session = _callback_sessions.get(loop)
+    if session is None or session.closed:
+        connector = aiohttp.TCPConnector(
+            limit=32, limit_per_host=16, ttl_dns_cache=300, keepalive_timeout=60,
+        )
+        session = aiohttp.ClientSession(
+            connector=connector, timeout=aiohttp.ClientTimeout(total=None),
+        )
+        _callback_sessions[loop] = session
+    return session
+
+
+async def close_callback_session():
+    """Close pooled callback connections owned by the current event loop."""
+    session = _callback_sessions.pop(asyncio.get_running_loop(), None)
+    if session and not session.closed:
+        await session.close()
 
 
 async def post_internal_callback(callback_id: str, payload: dict, *, correlation_id: str | None = None, execution_url=None, execution_token=None):
@@ -42,34 +71,35 @@ async def post_internal_callback(callback_id: str, payload: dict, *, correlation
             sock_read=max(1, timeout_total - connect_timeout),
         )
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            max_attempts = 2  # initial try + one fixed-delay retry
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    async with session.post(url, json=payload, headers=headers) as resp:
-                        status = resp.status
-                        # Success
-                        if status < 400:
-                            return True
+        session = _callback_http_session()
+        max_attempts = 2  # initial try + one fixed-delay retry
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with session.post(url, json=payload, headers=headers, timeout=timeout) as resp:
+                    status = resp.status
+                    # Consume small callback acknowledgements so the keep-alive
+                    # socket is available immediately for the next operation.
+                    await resp.read()
+                    if status < 400:
+                        return True
 
-                        # Transient statuses eligible for single retry
-                        is_transient = (status == 429) or (500 <= status < 600)
+                    # Transient statuses eligible for single retry
+                    is_transient = (status == 429) or (500 <= status < 600)
 
-                        if not is_transient or attempt == max_attempts:
-                            return False
-
-                        # Fixed delay before the one-and-only retry
-                        await asyncio.sleep(retry_delay_ms / 1000.0)
-                        continue
-
-                except (asyncio.TimeoutError, aiohttp.ClientError):
-                    if attempt == max_attempts:
+                    if not is_transient or attempt == max_attempts:
                         return False
+
                     await asyncio.sleep(retry_delay_ms / 1000.0)
                     continue
-                except Exception:
-                    # Unknown error: do not retry
+
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                if attempt == max_attempts:
                     return False
+                await asyncio.sleep(retry_delay_ms / 1000.0)
+                continue
+            except Exception:
+                # Unknown error: do not retry
+                return False
 
     except Exception:
         # Setup failure – nothing else to do
