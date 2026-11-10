@@ -9,6 +9,7 @@ on:
       - 'src/awfl/response_handler/**'
       - 'tests/test_execution*.py'
       - 'tests/test_mcp_shared.py'
+      - 'tests/test_agent_native_tools.py'
       - '.github/workflows/test-execution.yml'
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'src/awfl/response_handler/**'
       - 'tests/test_execution*.py'
       - 'tests/test_mcp_shared.py'
+      - 'tests/test_agent_native_tools.py'
       - '.github/workflows/test-execution.yml'
 jobs:
   test:
