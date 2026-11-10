@@ -24,6 +24,20 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output['exit_code'], 7)
         self.assertEqual({c['stream'] for c in output['chunks']}, {'stdout', 'stderr'})
 
+    async def test_no_lifetime_execution_limit(self):
+        # Simulate 128 completed runs without spawning 128 subprocesses.
+        # A long-lived consumer must still accept its next command, and
+        # must not discard previously stored execution history.
+        for i in range(128):
+            self.runtime.executions[f"old-{i}"] = {"state": "completed"}
+        result = await self.runtime.invoke("run_command", {
+            "command": "printf after-128", "yield_time_ms": 1000,
+        })
+        self.assertEqual(result["state"], "completed")
+        self.assertIn("after-128", str(result["chunks"]))
+        self.assertEqual(len(self.runtime.executions), 129)
+        self.assertIn("old-0", self.runtime.executions)
+
     async def test_poll_cancel_and_reuse(self):
         result = await self.runtime.invoke('run_command', {'command': 'echo first; sleep 30; echo last'})
         self.assertEqual(result['state'], 'running')
