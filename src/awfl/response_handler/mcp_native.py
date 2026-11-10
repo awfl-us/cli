@@ -67,6 +67,16 @@ def is_agent_native(name, args):
         set(args) & _ADVANCED_FILE_ARGS.get(name, set()))
 
 
+def _relative_to_workdir(value, workdir):
+    """Use the workflow's working directory for relative filesystem paths.
+
+    The shared runtime validates the resolved path remains inside its root.
+    """
+    if not workdir or Path(value).is_absolute():
+        return value
+    return str(Path(workdir) / value)
+
+
 async def handle_agent_native(data, name, args, send_result, *, runtime=None):
     """Handle agent callbacks using the same implementation as MCP tools.
 
@@ -77,10 +87,15 @@ async def handle_agent_native(data, name, args, send_result, *, runtime=None):
     params = dict(args)
     if name in ("READ_FILE", "UPDATE_FILE") and "filepath" in params:
         params.setdefault("path", params.pop("filepath"))
-    if name in ("RUN_COMMAND", "APPLY_PATCH") and "cwd" not in params:
-        workdir = data.get("workdir")
-        if workdir:
-            params["cwd"] = workdir
+    workdir = data.get("workdir")
+    if name in ("RUN_COMMAND", "APPLY_PATCH") and "cwd" not in params and workdir:
+        params["cwd"] = workdir
+    path_key = {
+        "READ_FILE": "path", "UPDATE_FILE": "path",
+        "SEARCH_FILES": "root", "LIST_DIRECTORY": "path",
+    }.get(name)
+    if path_key and workdir:
+        params[path_key] = _relative_to_workdir(params.get(path_key) or ".", workdir)
     if name == "RUN_COMMAND" and "timeout" not in params and "timeout_ms" not in params:
         seconds = data.get("timeout_seconds")
         if seconds is not None:
