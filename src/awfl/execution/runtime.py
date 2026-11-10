@@ -92,8 +92,6 @@ class Runtime:
         if name == "run_command":
             if sum(x["state"] == "running" for x in self.executions.values()) >= self.concurrency_limit:
                 raise ValueError("Concurrent command limit reached")
-            if len(self.executions) >= 128:
-                raise ValueError("Workspace execution limit (128) reached")
             cwd = self.path(args.get("cwd"))
             if not cwd.is_dir():
                 raise ValueError("Working directory does not exist")
