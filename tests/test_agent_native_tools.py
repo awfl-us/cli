@@ -66,6 +66,27 @@ class AgentToolParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected["state"], "failed")
         self.assertEqual((self.root / "once.txt").read_text(), "one")
 
+    async def test_advanced_file_operations_respect_workflow_workdir(self):
+        (self.root / "repo").mkdir()
+        workdir = {"workdir": "repo"}
+        write = await self.call("UPDATE_FILE", {
+            "filepath": "nested/example.txt", "content": "workdir parity", "create_only": True,
+        }, workdir)
+        self.assertTrue(write["created"])
+        self.assertEqual((self.root / "repo/nested/example.txt").read_text(), "workdir parity")
+        read = await self.call("READ_FILE", {
+            "filepath": "nested/example.txt", "start_line": 1, "end_line": 1,
+        }, workdir)
+        self.assertEqual(read["content"], "workdir parity")
+        found = await self.call("SEARCH_FILES", {"pattern": "workdir parity"}, workdir)
+        self.assertEqual(len(found["matches"]), 1)
+        listed = await self.call("LIST_DIRECTORY", {"recursive": True}, workdir)
+        self.assertTrue(any(entry["name"] == "example.txt" for entry in listed["entries"]))
+        blocked = await self.call("READ_FILE", {
+            "filepath": "../../outside", "start_line": 1,
+        }, workdir)
+        self.assertEqual(blocked["state"], "failed")
+
     async def test_async_shell_polls_existing_execution_and_preserves_old_field_aliases(self):
         started = await self.call("RUN_COMMAND", {
             "command": "printf agent-native", "yield_time_ms": 0,
@@ -78,6 +99,18 @@ class AgentToolParityTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(polled["state"], "completed")
         self.assertIn("agent-native", str(polled.get("chunks")))
+
+    async def test_execution_history_has_no_lifetime_cap_or_eviction(self):
+        runtime = Runtime(self.root)
+        for index in range(128):
+            runtime.executions[f"old-{index}"] = {"state": "completed"}
+        started = await runtime.invoke("run_command", {
+            "command": "printf after-128", "yield_time_ms": 1000,
+        })
+        self.assertEqual(started["state"], "completed")
+        self.assertEqual(len(runtime.executions), 129)
+        self.assertIn("old-0", runtime.executions)
+        self.assertIn("old-127", runtime.executions)
 
     async def test_normal_callback_routes_patch_and_legacy_tools_stay_unchanged(self):
         self.assertTrue(is_agent_native("APPLY_PATCH", {"patch": "x"}))
