@@ -37,6 +37,9 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("after-128", str(result["chunks"]))
         self.assertEqual(len(self.runtime.executions), 129)
         self.assertIn("old-0", self.runtime.executions)
+        # Synthetic history entries aren't real processes; remove them before tearDown.
+        for i in range(128):
+            del self.runtime.executions[f"old-{i}"]
 
     async def test_poll_cancel_and_reuse(self):
         result = await self.runtime.invoke('run_command', {'command': 'echo first; sleep 30; echo last'})
