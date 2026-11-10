@@ -4,6 +4,7 @@ The OAuth refresh token stays on the AWFL server. This process only receives
 short-lived access tokens over a lock-bound capability endpoint.
 """
 import json
+import math
 import os
 import pathlib
 import random
@@ -12,6 +13,30 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+
+# A Google OAuth token typically lasts 3600 seconds, but the server may give
+# us a cached token that has already consumed part of that lifetime.
+MAX_REFRESH_SECONDS = 35 * 60
+EXPIRY_MARGIN_SECONDS = 5 * 60
+MIN_REFRESH_SECONDS = 15
+RETRY_SECONDS = 20
+
+
+def next_refresh_delay(expires_in):
+    """Schedule strictly before expiry, even when the broker reuses a token."""
+    if expires_in is None:
+        # Older server versions do not send a TTL. Keep a conservative upper
+        # bound so existing consumer images remain compatible.
+        return MAX_REFRESH_SECONDS
+    try:
+        remaining = float(expires_in)
+    except (TypeError, ValueError, OverflowError):
+        return MIN_REFRESH_SECONDS
+    if not math.isfinite(remaining):
+        return MIN_REFRESH_SECONDS
+    return max(MIN_REFRESH_SECONDS,
+               min(MAX_REFRESH_SECONDS, int(remaining - EXPIRY_MARGIN_SECONDS)))
+
 
 def _atomic_write(path, token):
     target = pathlib.Path(path)
@@ -65,10 +90,12 @@ def refresh():
     github_token = result.get("githubToken")
     if not google_token and not github_token:
         raise ValueError("Credential refresh returned no usable credentials")
+    google_ttl = result.get("expiresIn") if google_token else None
     if google_token and os.environ.get("CLOUDSDK_AUTH_ACCESS_TOKEN_FILE"):
         _atomic_write(os.environ["CLOUDSDK_AUTH_ACCESS_TOKEN_FILE"], google_token)
     if github_token and os.environ.get("AWFL_GITHUB_TOKEN_FILE"):
         _atomic_write(os.environ["AWFL_GITHUB_TOKEN_FILE"], github_token)
+    return next_refresh_delay(google_ttl)
 
 def main():
     if "--git-credential" in sys.argv:
@@ -77,15 +104,16 @@ def main():
     once = "--once" in sys.argv
     while True:
         try:
-            refresh()
+            delay = refresh()
             if once:
                 return
-            time.sleep(2400 + random.randrange(120))
+            # Jitter earlier, never later than the expiry-based deadline.
+            time.sleep(max(MIN_REFRESH_SECONDS, delay - random.randrange(30)))
         except (OSError, ValueError, KeyError, urllib.error.HTTPError) as exc:
             print("[awfl] Consumer credential refresh failed:", type(exc).__name__, file=sys.stderr, flush=True)
             if once:
                 raise SystemExit(1)
-            time.sleep(60)
+            time.sleep(RETRY_SECONDS)
 
 if __name__ == "__main__":
     main()
