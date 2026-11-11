@@ -25,6 +25,15 @@ class CredentialRotationTests(unittest.TestCase):
         self.assertEqual(next_refresh_delay(float('nan')), MIN_REFRESH_SECONDS)
         self.assertEqual(next_refresh_delay(None), MAX_REFRESH_SECONDS)
 
+    def test_shorter_github_lifetime_controls_refresh(self):
+        self.assertEqual(next_refresh_delay(3600, 420, github_present=True), 120)
+        self.assertEqual(next_refresh_delay(3600, 2800, github_present=True), MAX_REFRESH_SECONDS)
+        self.assertEqual(next_refresh_delay(None, 420, github_present=True), 120)
+        self.assertEqual(next_refresh_delay(3600, 0, github_present=True), MIN_REFRESH_SECONDS)
+        self.assertEqual(next_refresh_delay(3600, float('nan'), github_present=True), MIN_REFRESH_SECONDS)
+        self.assertEqual(next_refresh_delay(3600, None, github_present=True), 5 * 60)
+        self.assertEqual(next_refresh_delay(3600, 420, github_present=False), MAX_REFRESH_SECONDS)
+
     def test_refreshed_token_writes_atomically_and_returns_expiry_based_delay(self):
         with tempfile.TemporaryDirectory() as root:
             google = Path(root) / 'google'
@@ -42,6 +51,7 @@ class CredentialRotationTests(unittest.TestCase):
                 'accessToken': 'fake-google-access-token',
                 'expiresIn': 620,
                 'githubToken': 'fake-github-token',
+                'githubExpiresIn': 900,
             }).encode()
             with mock.patch.dict('os.environ', env), mock.patch(
                 'awfl.consumer_credentials.urllib.request.urlopen',
@@ -52,6 +62,26 @@ class CredentialRotationTests(unittest.TestCase):
             self.assertEqual(github.read_text().strip(), 'fake-github-token')
             self.assertEqual(google.stat().st_mode & 0o777, 0o600)
             self.assertEqual(github.stat().st_mode & 0o777, 0o600)
+
+    def test_refresh_uses_github_ttl_when_google_lives_longer(self):
+        with tempfile.TemporaryDirectory() as root:
+            payload = json.dumps({
+                'accessToken': 'gcp-token', 'expiresIn': 3600,
+                'githubToken': 'github-token', 'githubExpiresIn': 360,
+            }).encode()
+            env = {
+                'AWFL_CREDENTIAL_REFRESH_ORIGIN': 'https://api.example.test',
+                'AWFL_USER_ID': 'u', 'AWFL_PROJECT_ID': 'p',
+                'AWFL_CONSUMER_ID': 'consumer-1',
+                'AWFL_CREDENTIAL_REFRESH_CAPABILITY': 'test-capability',
+                'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE': str(Path(root) / 'google'),
+                'AWFL_GITHUB_TOKEN_FILE': str(Path(root) / 'github'),
+            }
+            with mock.patch.dict('os.environ', env), mock.patch(
+                'awfl.consumer_credentials.urllib.request.urlopen',
+                return_value=io.BytesIO(payload),
+            ):
+                self.assertEqual(refresh(), 60)
 
     def test_loop_uses_returned_ttl_without_adding_delay_past_deadline(self):
         with mock.patch('awfl.consumer_credentials.refresh', return_value=320), \
