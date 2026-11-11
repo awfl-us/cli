@@ -22,20 +22,27 @@ MIN_REFRESH_SECONDS = 15
 RETRY_SECONDS = 20
 
 
-def next_refresh_delay(expires_in):
-    """Schedule strictly before expiry, even when the broker reuses a token."""
-    if expires_in is None:
-        # Older server versions do not send a TTL. Keep a conservative upper
-        # bound so existing consumer images remain compatible.
-        return MAX_REFRESH_SECONDS
-    try:
-        remaining = float(expires_in)
-    except (TypeError, ValueError, OverflowError):
-        return MIN_REFRESH_SECONDS
-    if not math.isfinite(remaining):
-        return MIN_REFRESH_SECONDS
-    return max(MIN_REFRESH_SECONDS,
-               min(MAX_REFRESH_SECONDS, int(remaining - EXPIRY_MARGIN_SECONDS)))
+def next_refresh_delay(expires_in, github_expires_in=None, github_present=False):
+    """Schedule before the earliest credential expiry, including cached tokens."""
+    def delay(ttl):
+        if ttl is None:
+            return MAX_REFRESH_SECONDS
+        try:
+            remaining = float(ttl)
+        except (TypeError, ValueError, OverflowError):
+            return MIN_REFRESH_SECONDS
+        if not math.isfinite(remaining):
+            return MIN_REFRESH_SECONDS
+        return max(MIN_REFRESH_SECONDS,
+                   min(MAX_REFRESH_SECONDS, int(remaining - EXPIRY_MARGIN_SECONDS)))
+
+    google_delay = delay(expires_in)
+    if not github_present:
+        return google_delay
+    # An older broker may send GitHub tokens without their expiration.
+    # Refresh conservatively until both sides support explicit GitHub TTLs.
+    github_delay = delay(github_expires_in) if github_expires_in is not None else 5 * 60
+    return min(google_delay, github_delay)
 
 
 def _atomic_write(path, token):
@@ -91,11 +98,12 @@ def refresh():
     if not google_token and not github_token:
         raise ValueError("Credential refresh returned no usable credentials")
     google_ttl = result.get("expiresIn") if google_token else None
+    github_ttl = result.get("githubExpiresIn") if github_token else None
     if google_token and os.environ.get("CLOUDSDK_AUTH_ACCESS_TOKEN_FILE"):
         _atomic_write(os.environ["CLOUDSDK_AUTH_ACCESS_TOKEN_FILE"], google_token)
     if github_token and os.environ.get("AWFL_GITHUB_TOKEN_FILE"):
         _atomic_write(os.environ["AWFL_GITHUB_TOKEN_FILE"], github_token)
-    return next_refresh_delay(google_ttl)
+    return next_refresh_delay(google_ttl, github_ttl, github_present=bool(github_token))
 
 def main():
     if "--git-credential" in sys.argv:
