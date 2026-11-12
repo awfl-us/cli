@@ -33,6 +33,18 @@ Table of contents
 
 ## Overview
 - AWFL is a local CLI that connects to an AI workflows service. You select a workflow (agent), chat in natural language, and the agent can execute side effects via tool calls such as writing files or running commands.
+
+### Cloud workspace persistence
+
+Shared GKE consumers synchronize eligible workspace files to a project-scoped
+GCS prefix. The sync **preserves Git metadata and source files**, but excludes
+credentials and regenerated output, including conventional `target`, `dist`,
+`node_modules`, caches, and custom Cargo directories ending in `-target` such
+as `native-try-binaries-target`. A project can synchronize up to 30,000
+eligible files; excess files fail with a count rather than silently omitting
+source. Ignored legacy build objects already in GCS are not restored, but
+are not automatically deleted by periodic sync. They require a separately
+audited cleanup; this avoids accidentally deleting remote user data.
 - The CLI streams events using Server‑Sent Events (SSE) and ensures side effects are executed exactly once per project, even if you’ve opened multiple terminals.
 
 
