@@ -7,7 +7,7 @@ from unittest.mock import patch
 from aiohttp import web
 import aiohttp
 
-from awfl.consumer.workspace_sync import WorkspaceSync, allowed_file, _safe_target
+from awfl.consumer.workspace_sync import WorkspaceSync, allowed_file, ignored_directory, _safe_target
 
 
 class MemoryBucket(WorkspaceSync):
@@ -23,7 +23,10 @@ class MemoryBucket(WorkspaceSync):
         return "scoped-token"
 
     async def _list(self, session, token):
-        return {k: {"generation": v[0], "size": len(v[1]), "mode": v[2]} for k, v in self.objects.items()}
+        # Match the production GCS listing filter: ignored files may still
+        # physically exist in legacy storage but must not enter reconciliation.
+        return {k: {"generation": v[0], "size": len(v[1]), "mode": v[2]}
+                for k, v in self.objects.items() if allowed_file(k)}
 
     async def _download(self, session, token, rel, generation):
         value = self.objects[rel]
@@ -167,7 +170,10 @@ class WorkspaceSyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sensitive_paths_and_traversal_excluded(self):
         for p in (".env", "app/.env.production", "foo/.ssh/private", "repo/node_modules/pkg.js",
-                  "repo/.terraform/terraform.tfstate", "../../etc/passwd", "a//b", "/root/creds"):
+                  "repo/.terraform/terraform.tfstate", "../../etc/passwd", "a//b", "/root/creds",
+                  "awfl-product-cargo-target/debug/large.rlib",
+                  "native-try-binaries-target/debug/deps/libfoo.rmeta",
+                  "repo/custom-target/release/program"):
             self.assertFalse(allowed_file(p), p)
         for p in ("repo/src/main.py", "repo/.git/HEAD", "repo/.git/objects/aa/0123"):
             self.assertTrue(allowed_file(p), p)
@@ -179,6 +185,52 @@ class WorkspaceSyncTests(unittest.IsolatedAsyncioTestCase):
         (self.root / "indirect").symlink_to(self.root / "elsewhere")
         with self.assertRaisesRegex(ValueError, "Symlink"):
             _safe_target(self.root, "indirect/data.txt")
+
+    async def test_custom_cargo_target_directories_are_not_persisted_or_restored(self):
+        self.assertTrue(ignored_directory("awfl-product-cargo-target"))
+        self.assertTrue(ignored_directory("target"))
+        self.assertFalse(ignored_directory("git-targets"))
+        self.assertFalse(ignored_directory(".git"))
+        for rel in (
+            "awfl-product-cargo-target/debug/deps/libfoo.rlib",
+            "repo/native-try-binaries-target/release/workflow",
+            "repo/target/debug/deps/binary",
+        ):
+            target = self.root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"regenerable output")
+        git_head = self.root / "repo/.git/HEAD"
+        git_head.parent.mkdir(parents=True, exist_ok=True)
+        git_head.write_text("ref: refs/heads/main\n")
+        source = self.root / "repo/src/main.scala"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("object Main {}\n")
+        self.assertEqual(set(self.bucket._scan()), {"repo/.git/HEAD", "repo/src/main.scala"})
+        await self.bucket.sync_once()
+        self.assertEqual(set(self.bucket.objects), {"repo/.git/HEAD", "repo/src/main.scala"})
+
+        # Legacy generated files already present in GCS must not be restored
+        # to cold environments, nor be treated as deletions of source files.
+        self.bucket.objects["awfl-product-cargo-target/debug/deps/old.rlib"] = (
+            "9", b"old build output", 0o644)
+        with tempfile.TemporaryDirectory() as cold_root:
+            cold = MemoryBucket(Path(cold_root))
+            cold.objects = dict(self.bucket.objects)
+            await cold.sync_once()
+            self.assertFalse((Path(cold_root) / "awfl-product-cargo-target").exists())
+            self.assertEqual((Path(cold_root) / "repo/src/main.scala").read_text(),
+                             "object Main {}\n")
+            self.assertEqual((Path(cold_root) / "repo/.git/HEAD").read_text(),
+                             "ref: refs/heads/main\n")
+
+    async def test_file_limit_is_bounded_and_reports_eligible_count(self):
+        from awfl.consumer import workspace_sync
+        (self.root / "repo").mkdir()
+        for n in range(4):
+            (self.root / "repo" / f"src{n}.scala").write_text("ok")
+        with patch.object(workspace_sync, "MAX_FILES", 3):
+            with self.assertRaisesRegex(RuntimeError, "eligible files"):
+                self.bucket._scan()
 
     async def test_cloud_only(self):
         with patch.dict(os.environ, {"AWFL_CONSUMER_TYPE": "LOCAL", "AWFL_WORKSPACE_GCS_BUCKET": "test"}):

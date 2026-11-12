@@ -31,7 +31,19 @@ SKIP_FILES = {
     "id_rsa", "id_ed25519", "known_hosts", ".git-credentials",
 }
 MAX_FILE_BYTES = 64 * 1024 * 1024
-MAX_FILES = 10000
+# A project may contain multiple source checkouts and Git histories. Keep a
+# finite safety limit, but avoid rejecting normal multi-repository workspaces.
+MAX_FILES = 30000
+
+
+def ignored_directory(name: str) -> bool:
+    """Exclude regenerable build output, including Cargo custom target dirs.
+
+    Cargo supports CARGO_TARGET_DIR; in AWFL workspaces the target directory
+    often has a name such as `awfl-product-cargo-target`, which the old exact
+    `target` exclusion missed. Never exclude Git metadata/source worktrees.
+    """
+    return name in SKIP_DIRS or name.endswith("-target")
 STARTUP_RESTORE_CONCURRENCY = 16
 
 
@@ -41,7 +53,7 @@ def allowed_file(rel: str) -> bool:
     if (not rel or rel.startswith("/") or "\\" in rel or "\x00" in rel or
             any(p in ("", ".", "..") for p in rel.split("/"))):
         return False
-    if any(part in SKIP_DIRS for part in path.parts[:-1]):
+    if any(ignored_directory(part) for part in path.parts[:-1]):
         return False
     name = path.name
     if name in SKIP_FILES or name.startswith(".env."):
@@ -150,7 +162,7 @@ class WorkspaceSync:
     def _scan(self):
         files = {}
         for parent, dirs, names in os.walk(self.root, followlinks=False):
-            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and
+            dirs[:] = [d for d in dirs if not ignored_directory(d) and
                        not (Path(parent) / d).is_symlink()]
             for name in names:
                 path = Path(parent) / name
@@ -161,7 +173,9 @@ class WorkspaceSync:
                 if fingerprint is not None:
                     files[rel] = fingerprint
                     if len(files) > MAX_FILES:
-                        raise RuntimeError("Workspace sync file limit exceeded")
+                        raise RuntimeError(
+                            f"Workspace sync file limit exceeded: {len(files)} > {MAX_FILES} "
+                            "eligible files (build outputs are excluded)")
         return files
 
     async def _broker(self, session):
