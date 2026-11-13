@@ -232,6 +232,36 @@ class WorkspaceSyncTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "eligible files"):
                 self.bucket._scan()
 
+    async def test_cargo_build_output_trees_excluded_but_sources_preserved(self):
+        for path in (
+            "compiler/target/debug/deps/libserde.rlib",
+            "awfl-product-cargo-target/release/deps/foo.rlib",
+            "native-memory-build/release/deps/libchrono.rlib",
+            "native-local-subworkflow-build/release/.fingerprint/pkg",
+            "native-local-subworkflow-static/x86_64-unknown-linux-musl/release/deps/pkg",
+            "awfl-live-tooldefs-musl/x86_64-unknown-linux-musl/release/deps/pkg",
+            "realwf-execute-build/debug/deps/pkg",
+        ):
+            self.assertFalse(allowed_file(path), path)
+        for path in (
+            "compiler-rust/src/main.rs",
+            "native-memory-build/Cargo.toml",
+            "native-memory-build/src/main.rs",
+            "awfl-live-tooldefs-musl/src/main.rs",
+            "repo/release/notes.md",
+            "repo/project-build/src/lib.rs",
+            "repo/.git/HEAD",
+        ):
+            self.assertTrue(allowed_file(path), path)
+
+        for name in ("src/main.rs", "release/deps/library.rlib"):
+            path = self.root / "native-memory-build" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name)
+        paths = self.bucket._scan()
+        self.assertIn("native-memory-build/src/main.rs", paths)
+        self.assertNotIn("native-memory-build/release/deps/library.rlib", paths)
+
     async def test_cloud_only(self):
         with patch.dict(os.environ, {"AWFL_CONSUMER_TYPE": "LOCAL", "AWFL_WORKSPACE_GCS_BUCKET": "test"}):
             self.assertIsNone(WorkspaceSync.from_environment())
