@@ -44,6 +44,30 @@ def ignored_directory(name: str) -> bool:
     `target` exclusion missed. Never exclude Git metadata/source worktrees.
     """
     return name in SKIP_DIRS or name.endswith("-target")
+
+
+def ignored_path(parts) -> bool:
+    """Skip Cargo output trees without dropping neighboring generated source.
+
+    AWFL jobs have used custom Cargo output roots ending in -build, -static,
+    or -musl; unlike -target these can also contain crate source and manifests.
+    Ignore debug/release artifacts under them, not the whole source directory.
+    """
+    for index, name in enumerate(parts):
+        if ignored_directory(name):
+            return True
+        if not name.endswith(("-build", "-static", "-musl")):
+            continue
+        children = parts[index + 1:]
+        if children and children[0] in ("debug", "release"):
+            return True
+        if (len(children) >= 2
+                and children[1] in ("debug", "release")
+                and re.fullmatch(r"[a-zA-Z0-9_]+-(?:unknown|apple|pc)-[a-zA-Z0-9_-]+",
+                                 children[0])):
+            return True
+    return False
+
 STARTUP_RESTORE_CONCURRENCY = 16
 
 
@@ -53,7 +77,7 @@ def allowed_file(rel: str) -> bool:
     if (not rel or rel.startswith("/") or "\\" in rel or "\x00" in rel or
             any(p in ("", ".", "..") for p in rel.split("/"))):
         return False
-    if any(ignored_directory(part) for part in path.parts[:-1]):
+    if ignored_path(path.parts[:-1]):
         return False
     name = path.name
     if name in SKIP_FILES or name.startswith(".env."):
@@ -162,8 +186,11 @@ class WorkspaceSync:
     def _scan(self):
         files = {}
         for parent, dirs, names in os.walk(self.root, followlinks=False):
-            dirs[:] = [d for d in dirs if not ignored_directory(d) and
-                       not (Path(parent) / d).is_symlink()]
+            dirs[:] = [
+                d for d in dirs
+                if not (Path(parent) / d).is_symlink()
+                and not ignored_path((Path(parent) / d).relative_to(self.root).parts)
+            ]
             for name in names:
                 path = Path(parent) / name
                 rel = path.relative_to(self.root).as_posix()
