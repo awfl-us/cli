@@ -1,0 +1,49 @@
+diff --git a/src/awfl/bootstrap/args.py b/src/awfl/bootstrap/args.py
+new file mode 100644
+index 0000000..5810fb3
+--- /dev/null
++++ b/src/awfl/bootstrap/args.py
+@@ -0,0 +1,26 @@
++"""Startup argument/alias bootstrap helpers.
++
++These are placeholders extracted from main.py. A dedicated crawler will implement
++full behavior. Keep signatures stable.
++"""
++from __future__ import annotations
++from typing import Optional
++
++
++def process_run_alias_from_argv() -> None:
++    """Recognize quick aliases like 'run', 'headless', 'remote'. No-op placeholder."""
++    return None
++
++
++def startup_command_from_argv() -> Optional[str]:
++    """Return a startup command string to execute before entering the REPL, if any.
++    Placeholder returns None.
++    """
++    return None
++
++
++def is_long_running_startup(cmd: str) -> bool:
++    """Return True if the startup command is expected to keep running (e.g., dev start).
++    Placeholder returns False.
++    """
++    return False
+diff --git a/src/awfl/bootstrap/env.py b/src/awfl/bootstrap/env.py
+new file mode 100644
+index 0000000..1c99868
+--- /dev/null
++++ b/src/awfl/bootstrap/env.py
+@@ -0,0 +1,11 @@
++"""Environment-mode bootstrap helpers.
++
++Placeholder extracted from main.py; dedicated crawler will implement.
++"""
++from __future__ import annotations
++
++def init_env_mode_from_argv() -> None:
++    """Detect and initialize execution mode from argv/environment.
++    Placeholder: no-op.
++    """
++    return None

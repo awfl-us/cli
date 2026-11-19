@@ -1,6 +1,7 @@
 import os
 from awfl.utils import log_unique
 from .auth_cmds import print_whoami
+from awfl import state
 # from .workflows import resolve_workflows_dir
 
 
@@ -53,7 +54,11 @@ def print_status() -> None:
     has_override = bool(os.getenv('FIREBASE_ID_TOKEN'))
     proj = os.getenv('AWFL_PROJECT_ID') or '(auto)'
     ctype = os.getenv('AWFL_CONSUMER_TYPE') or 'LOCAL'
+    dev = state.get_dev_mode()
     # wf_dir = resolve_workflows_dir()
-    log_unique(f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'} | AWFL_PROJECT_ID={proj} | AWFL_CONSUMER_TYPE={ctype}")
+    log_unique(
+        f"⚙️ Exec mode: {mode} | API_ORIGIN: {origin} | SKIP_AUTH={skip} | OVERRIDE_TOKEN={'yes' if has_override else 'no'} | "
+        f"AWFL_PROJECT_ID={proj} | AWFL_CONSUMER_TYPE={ctype} | dev_mode={'on' if dev else 'off'}"
+    )
     if mode == 'api':
         print_whoami()

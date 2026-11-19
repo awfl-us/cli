@@ -1,0 +1,27 @@
+diff --git a/src/awfl/ui/prompt.py b/src/awfl/ui/prompt.py
+new file mode 100644
+index 0000000..ae26bed
+--- /dev/null
++++ b/src/awfl/ui/prompt.py
+@@ -0,0 +1,21 @@
++from __future__ import annotations
++import asyncio
++from prompt_toolkit import PromptSession
++from awfl.response_handler import get_latest_status
++
++
++def rprompt() -> str:
++    """Return a concise right-aligned status string for the REPL."""
++    status, _err = get_latest_status()
++    return f"({status})" if status else ""
++
++
++async def refresh_prompt_task(session: PromptSession) -> None:
++    """Periodically invalidate the UI so rprompt refreshes during idle."""
++    while True:
++        await asyncio.sleep(0.5)
++        try:
++            session.app.invalidate()
++        except Exception:
++            # Ignore transient UI errors
++            pass

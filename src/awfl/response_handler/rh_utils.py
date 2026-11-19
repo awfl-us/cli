@@ -29,12 +29,23 @@ def ts_to_ms(ts: str | None) -> int:
 
 
 def is_background_from_payload(data: dict) -> bool:
-    # Primary signal
+    # Primary signal (new path)
     if bool(data.get("background") is True):
         return True
-    # Legacy compatibility: callback_session starting with "background-"
+
+    # Legacy compatibility paths
+    # 1) callback_session starting with "background-"
     cb_sess = str(data.get("callback_session") or "")
-    return cb_sess.startswith("background-")
+    if cb_sess.startswith("background-"):
+        return True
+
+    # 2) attributes.sessionId (or top-level sessionId) starting with "background-"
+    attrs = data.get("attributes") or {}
+    sid = str(attrs.get("sessionId") or data.get("sessionId") or "")
+    if sid.startswith("background-"):
+        return True
+
+    return False
 
 
 def read_file_text_utf8_ignore(filepath: str) -> str:

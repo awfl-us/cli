@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Any
 
 from awfl.utils import log_unique
+from awfl import state
 
 from ..core import discover_paths, compose_status, get_state, _short_display, _env_suffix
 from ..core import _get_ngrok_existing_url, load_dev_config
@@ -15,10 +16,11 @@ def status_cmd(args: List[str]) -> bool:
 
     tunnel = _get_ngrok_existing_url()
     comp = compose_status(paths.compose_file)
-    state = get_state()
-    watch = "running" if state.get("watcher_task") and not state.get("watcher_task").done() else "stopped"
+    dev_on = state.get_dev_mode()
+    state_obj = get_state()
+    watch = "running" if state_obj.get("watcher_task") and not state_obj.get("watcher_task").done() else "stopped"
 
-    last = state.get("last_changed") or []
+    last = state_obj.get("last_changed") or []
     last_disp = ("\n- " + "\n- ".join(_short_display(paths, c) for c in last)) if last else " (none)"
 
     log_unique(
@@ -29,6 +31,7 @@ def status_cmd(args: List[str]) -> bool:
         f"- ngrok: {tunnel or 'none'}\n"
         f"- compose: {paths.compose_file or 'none'} ({comp})\n"
         f"- watcher: {watch}\n"
+        f"- dev mode: {'ON' if dev_on else 'OFF'}\n"
         f"- last changed YAMLs:{last_disp}\n"
         f"- default deploy: {os.getenv('PROJECT', 'topaigents')}/{os.getenv('AWFL_GCLOUD_LOCATION', 'us-central1')} (suffix {_env_suffix()})"
     )

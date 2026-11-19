@@ -1,6 +1,6 @@
 import unittest
 
-from cli.response_handler.rh_utils import sanitize_shell_command
+from awfl.response_handler.rh_utils import sanitize_shell_command
 
 
 class TestSanitizeShellCommand(unittest.TestCase):

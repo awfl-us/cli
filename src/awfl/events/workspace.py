@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import subprocess
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 import aiohttp
@@ -121,6 +123,57 @@ def _save_project_cache(obj: Dict[str, Any]) -> None:
         pass
 
 
+def _read_local_awfl_config_project_id(root: Optional[str]) -> Optional[str]:
+    """Read repo-local .awfl/config.json and return projectId if present."""
+    try:
+        base = root or os.getcwd()
+        cfg_path = os.path.join(base, ".awfl", "config.json")
+        if not os.path.isfile(cfg_path):
+            return None
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        pid = data.get("projectId") or data.get("project_id")
+        if isinstance(pid, str) and pid.strip():
+            return pid.strip()
+        return None
+    except Exception:
+        return None
+
+
+def _sanitize_name(raw: str) -> str:
+    s = (raw or "").strip().lower()
+    s = s.replace(" ", "-").replace("_", "-")
+    s = re.sub(r"[^a-z0-9.-]", "", s)
+    s = re.sub(r"-+", "-", s).strip("-.")
+    return s or "repo"
+
+
+def _write_repo_awfl_config(base: Path, project_id: str, name: Optional[str]) -> None:
+    try:
+        cfg_dir = base / ".awfl"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = cfg_dir / "config.json"
+        data: Dict[str, Any] = {}
+        if cfg_path.is_file():
+            try:
+                existing = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    data.update(existing)
+            except Exception:
+                pass
+        data["projectId"] = project_id
+        if name:
+            data["name"] = name
+        tmp = cfg_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, cfg_path)
+        log_unique(f"📝 Initialized .awfl/config.json with projectId={project_id}")
+    except Exception as e:
+        log_unique(f"⚠️ Couldn't write .awfl/config.json: {e}")
+
+
 async def fetch_projects(session: aiohttp.ClientSession) -> list[dict]:
     origin = get_api_origin()
     url = f"{origin}/workflows/projects"
@@ -149,13 +202,13 @@ async def fetch_projects(session: aiohttp.ClientSession) -> list[dict]:
 
 async def create_project(
     session: aiohttp.ClientSession,
-    remote: str,
+    remote: Optional[str] = None,
     name: Optional[str] = None,
     live: Optional[bool] = None,
 ) -> Optional[dict]:
     """Create a project via POST /workflows/projects.
 
-    The service generates a random id; we only send remote, optional name and live.
+    The service generates a random id; we send optional remote, optional name and live.
     Returns the created project object or None on failure.
     """
     origin = get_api_origin()
@@ -166,7 +219,9 @@ async def create_project(
     except Exception:
         pass
 
-    payload: Dict[str, Any] = {"remote": remote}
+    payload: Dict[str, Any] = {}
+    if remote:
+        payload["remote"] = remote
     if name:
         payload["name"] = name.strip()
     if live is not None:
@@ -193,7 +248,7 @@ async def create_project(
         return None
 
 
-def repo_remote():
+def repo_remote() -> Optional[str]:
     # When an explicit project override is provided, skip git-related diagnostics entirely
     if os.getenv("AWFL_PROJECT_ID"):
         return None
@@ -202,6 +257,12 @@ def repo_remote():
     if not root:
         log_unique("ℹ️ Not in a git repo; cannot resolve project for workspace.")
         return None
+
+    # If a local .awfl/config.json already has a projectId, avoid noisy 'no origin' logs
+    if _read_local_awfl_config_project_id(root):
+        # We purposefully return None quietly; resolve_project_id will use local config
+        return None
+
     remote = _get_git_remote(root)
     if not remote:
         log_unique("ℹ️ No git remote 'origin' found; cannot resolve project for workspace.")
@@ -218,9 +279,11 @@ async def resolve_project_id(
     """Resolve the project id for the current git repo or honor AWFL_PROJECT_ID override.
 
     - If AWFL_PROJECT_ID is set: early-return that value, skip git discovery and related logs.
+    - Else: First prefer a repo-local .awfl/config.json projectId to avoid noisy 'no origin' logs.
     - Else: Checks a local cache (by derived name org/repo) to avoid races/consistency gaps.
     - Lists existing projects and matches by normalized remote.
     - If create_if_missing is True, creates a new project with name derived from org/repo.
+    - When no git remote is present and no local config, creates a project and writes .awfl/config.json.
     - Returns the project id or None if not found/created.
     """
     # 0) Environment override takes precedence
@@ -231,21 +294,41 @@ async def resolve_project_id(
         log_unique(f"ℹ️ Using AWFL_PROJECT_ID={pid}; skipping git discovery")
         return pid
 
+    # 1) Prefer repo-local config to avoid noisy logs before attempting to read remotes
+    root = _detect_git_root() or os.getcwd()
+    pid = _read_local_awfl_config_project_id(root)
+    if pid:
+        set_project_id(pid)
+        return pid
+
+    # 2) Inspect git remote (may log if no origin, but at this point we know no local projectId exists)
     norm = repo_remote()
 
+    # Fallback when no git remote is configured: create a local project and write config
     if not norm:
+        if create_if_missing:
+            base = Path(root or os.getcwd())
+            display_name = _sanitize_name(base.name)
+            created = await create_project(session, remote=None, name=display_name, live=False)
+            if created and isinstance(created, dict):
+                new_pid = (created.get("id") or created.get("projectId") or "").strip()
+                if new_pid:
+                    _write_repo_awfl_config(base, new_pid, display_name)
+                    set_project_id(new_pid)
+                    return new_pid
+            log_unique("⚠️ No local project configured and failed to create one. Try 'awfl auth login' or set AWFL_PROJECT_ID.")
         return None
 
     name_key = _derive_project_name(norm) or norm
 
-    # 1) Local cache first (keyed by derived name)
+    # 3) Local cache first (keyed by derived name)
     cache = _load_project_cache()
     cached_id = cache.get(name_key)
     if isinstance(cached_id, str) and cached_id:
         set_project_id(cached_id)
         return cached_id
 
-    # 2) Service list
+    # 4) Service list
     projs = await fetch_projects(session)
     for p in projs:
         r = p.get("remote") or ""
@@ -260,7 +343,7 @@ async def resolve_project_id(
     if not create_if_missing:
         return None
 
-    # 3) Not found -> create it using org/repo as the display name only
+    # 5) Not found -> create it using org/repo as the display name only
     display_name = _derive_project_name(norm)
     created = await create_project(session, remote=norm, name=display_name, live=False)
     if created and isinstance(created, dict):
@@ -283,7 +366,7 @@ async def resolve_workspace(
 ) -> Optional[Dict[str, Any]]:
     origin = get_api_origin()
     url = f"{origin}/workflows/workspace/resolve"
-    params: Dict[str, Any] = {"projectId": project_id}
+    params: Dict[str, Any] = {"projectId": {"id": project_id}.get("id", project_id)}
     if session_id:
         params["sessionId"] = session_id
     if ttl_ms is not None:

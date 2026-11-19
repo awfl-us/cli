@@ -184,7 +184,8 @@ def deploy_awfl_workflows(generate_only: bool = False, force: bool = False) -> b
         "us.awfl.workflows.assistant.ExtractTopics",
         "us.awfl.workflows.context.ContextCollapser",
         "us.awfl.workflows.helpers.Chain",
-        "us.awfl.workflows.helpers.links.SaveReflection"
+        "us.awfl.workflows.helpers.links.SaveReflection",
+        "us.awfl.workflows.helpers.Convo"
     ]
 
     if not (generate_for_classes):

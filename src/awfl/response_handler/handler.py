@@ -43,8 +43,15 @@ async def handle_response(data: dict):
 
     updated_at = data.get("create_time")
 
-    # Current session
-    session_id = get_session()
+    # Resolve session for callbacks from the event first to preserve attribution
+    # Preference order: callback_session -> attributes.sessionId -> data.sessionId -> get_session()
+    attrs = data.get("attributes") or {}
+    callback_session = (
+        data.get("callback_session")
+        or attrs.get("sessionId")
+        or data.get("sessionId")
+        or get_session()
+    )
 
     # Optional per-event working directory (when provided by SSE event)
     workdir = data.get("workdir")
@@ -87,7 +94,7 @@ async def handle_response(data: dict):
                     path.write_text(content)
                     await send_result({
                         "filepath": filepath,
-                        "sessionId": session_id,
+                        "sessionId": callback_session,
                         "timestamp": updated_at or datetime.utcnow().isoformat() + "Z",
                     })
                 except Exception as e:
@@ -141,7 +148,7 @@ async def handle_response(data: dict):
                     )
                     exit_code = result.returncode
                     await send_result({
-                        "sessionId": session_id,
+                        "sessionId": callback_session,
                         "command": command,
                         "output": output,
                         "error": error,
@@ -161,7 +168,7 @@ async def handle_response(data: dict):
                     # Log timeout with explicit null exit code
                     log_unique("RUN_COMMAND timed out: exit=null")
                     await send_result({
-                        "sessionId": session_id,
+                        "sessionId": callback_session,
                         "command": command,
                         "output": output,
                         "error": err_msg,
@@ -186,7 +193,7 @@ async def handle_response(data: dict):
                     truncated = len(content) > len(content_to_send)
 
                     await send_result({
-                        "sessionId": session_id,
+                        "sessionId": callback_session,
                         "filepath": filepath,
                         "content": content_to_send,
                         "truncated": truncated,
@@ -196,7 +203,7 @@ async def handle_response(data: dict):
                     # Error logging remains in handler
                     log_unique(f"Failed to read file: {filepath} — {e}")
                     await send_result({
-                        "sessionId": session_id,
+                        "sessionId": callback_session,
                         "filepath": filepath,
                         "content": str(e),
                         "timestamp": updated_at or datetime.utcnow().isoformat() + "Z",

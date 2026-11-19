@@ -14,6 +14,9 @@ _active_execution: Optional[Tuple[str, str]] = None
 # Process-local workflow environment suffix (e.g., "Dev" or "")
 _workflow_env_suffix: Optional[str] = None
 
+# Explicit dev mode toggle (separate from services); default OFF (prod)
+_dev_mode: bool = False
+
 
 def normalize_workflow(name: str | None) -> str:
     """Normalize workflow identifier to dashed form and strip prefixes.
@@ -66,6 +69,24 @@ def get_workflow_env_suffix() -> Optional[str]:
     return _workflow_env_suffix
 
 
+# ---- Dev mode toggle ----
+
+def set_dev_mode(on: bool) -> None:
+    """Enable/disable dev mode toggle and keep env suffix in sync.
+
+    This does NOT start/stop any services. It only affects how workflow names
+    are suffixed when executing (e.g., *Dev when ON).
+    """
+    global _dev_mode
+    _dev_mode = bool(on)
+    # Keep suffix synchronized for downstream utils.workflows
+    set_workflow_env_suffix("Dev" if _dev_mode else "")
+
+
+def get_dev_mode() -> bool:
+    return _dev_mode
+
+
 __all__ = [
     "DEFAULT_WORKFLOW",
     "normalize_workflow",
@@ -76,4 +97,6 @@ __all__ = [
     "clear_active_execution",
     "set_workflow_env_suffix",
     "get_workflow_env_suffix",
+    "set_dev_mode",
+    "get_dev_mode",
 ]

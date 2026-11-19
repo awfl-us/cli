@@ -1,0 +1,17 @@
+diff --git a/src/awfl/dev/cleanup.py b/src/awfl/dev/cleanup.py
+new file mode 100644
+index 0000000..5c4fb7a
+--- /dev/null
++++ b/src/awfl/dev/cleanup.py
+@@ -0,0 +1,11 @@
++from __future__ import annotations
++
++
++def dev_cleanup() -> None:
++    """Attempt to shut down dev resources (watcher, docker compose, ngrok)."""
++    try:
++        from awfl.cmds.dev.subcommands.stop import stop_dev
++        stop_dev([])
++    except Exception:
++        # Best-effort cleanup
++        pass

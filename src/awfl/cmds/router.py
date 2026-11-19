@@ -39,11 +39,13 @@ def _default_help() -> bool:
         "  model [name]\n"
         "  workflows | ls\n"
         "  call <workflow> [args...]\n"
+        "  start [--no-ngrok] [--no-compose] [--no-watch] [--port N] ... (does not toggle dev mode)\n"
+        "  watch  (alias for: start --no-ngrok --no-compose; does not toggle dev mode)\n"
         "  stop | cancel | abort\n"
         "  deploy workflows\n"
         "  deploy awfl workflows [--force]\n"
         "  upload files [--delete]\n"
-        "  dev <subcommand>  (dev help for details)\n"
+        "  dev <subcommand>  (dev help; includes dev on|off|status)\n"
     )
     return True
 
@@ -158,6 +160,12 @@ def _handle_model(args: List[str]) -> bool:
     return get_or_set_model(name)
 
 
+def _forward_to_dev(sub: str, line: str) -> bool:
+    parts = shlex.split(line)
+    args = parts[1:] if len(parts) >= 2 else []
+    return handle_dev_command([sub] + args)
+
+
 def handle_command(line: str) -> bool:
     cmd = _normalize(line)
     if not cmd:
@@ -203,6 +211,14 @@ def handle_command(line: str) -> bool:
         parts = shlex.split(line)
         name = parts[1] if len(parts) >= 2 else None
         return _handle_model([name] if name else [])
+
+    # Top-level service controls (do NOT toggle dev mode)
+    if cmd == "start" or cmd.startswith("start "):
+        return _forward_to_dev("start", line)
+    if cmd == "watch" or cmd.startswith("watch "):
+        # Forward to dev watch (which aliases to start --no-ngrok --no-compose)
+        return _forward_to_dev("watch", line)
+
     if cmd in ("stop", "cancel", "abort"):
         return stop_or_cancel_active()
     if cmd == "deploy workflows":

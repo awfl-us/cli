@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List
 
 from awfl.utils import log_unique
+from awfl import state
 
 # Subcommand implementations are split into focused modules under subcommands/
 from .subcommands import (
@@ -18,6 +19,7 @@ from .subcommands import (
 HELP_TEXT = (
     "Dev commands:\n"
     "  dev status\n"
+    "  dev on | dev off   (toggle persisted dev mode; affects workflow name suffix only)\n"
     "  dev start [--no-ngrok] [--no-compose] [--no-watch] [--port N] "
     "[--auto-deploy=on|off] [--compose-file PATH] [--workflows-dir PATH] "
     "[--location REGION] [--project ID] [--reconfigure|-r] [-y|--yes] [--no-prompt]\n"
@@ -36,6 +38,17 @@ def handle_dev_command(args: List[str]) -> bool:
 
     sub = args[0]
     rest = args[1:]
+
+    if sub == "on":
+        state.set_dev_mode(True)
+        suf = state.get_workflow_env_suffix()
+        log_unique(f"✅ Dev mode ON (suffix {suf if suf is not None else ''}).")
+        return True
+    if sub == "off":
+        state.set_dev_mode(False)
+        suf = state.get_workflow_env_suffix()
+        log_unique(f"✅ Dev mode OFF (suffix {suf if suf is not None else ''}).")
+        return True
 
     if sub == "start":
         return start_dev(rest)

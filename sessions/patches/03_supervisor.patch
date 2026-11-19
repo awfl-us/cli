@@ -1,0 +1,38 @@
+diff --git a/src/awfl/consumer/supervisor.py b/src/awfl/consumer/supervisor.py
+new file mode 100644
+index 0000000..fd31351
+--- /dev/null
++++ b/src/awfl/consumer/supervisor.py
+@@ -0,0 +1,32 @@
++from __future__ import annotations
++import asyncio
++from typing import Optional
++
++
++def attach_crash_on_consumer_exit(task: asyncio.Task, name: str, shutdown_evt: asyncio.Event, fatal: bool = True) -> None:
++    """Attach a done-callback that signals shutdown when the consumer exits.
++    Placeholder implementation: if fatal, set the shutdown event on completion.
++    Never raises.
++    """
++    def _on_done(_t: asyncio.Task) -> None:
++        try:
++            # Accessing exception() will re-raise if task failed; swallow it.
++            _ = _t.exception()
++        except asyncio.CancelledError:
++            return
++        except Exception:
++            pass
++        if fatal:
++            try:
++                shutdown_evt.set()
++            except Exception:
++                pass
++    try:
++        task.add_done_callback(_on_done)
++    except Exception:
++        # Best-effort: if we cannot attach, still request shutdown to be safe.
++        if fatal:
++            try:
++                shutdown_evt.set()
++            except Exception:
++                pass

@@ -1,0 +1,18 @@
+diff --git a/src/awfl/session/workflow.py b/src/awfl/session/workflow.py
+new file mode 100644
+index 0000000..9bc6c45
+--- /dev/null
++++ b/src/awfl/session/workflow.py
+@@ -0,0 +1,12 @@
++from __future__ import annotations
++import os
++from awfl.state import get_active_workflow, normalize_workflow, DEFAULT_WORKFLOW
++
++
++def compute_session_workflow_name() -> str:
++    """Resolve the current session/workflow identity used for SSE filtering."""
++    override = os.environ.get("ASSISTANT_WORKFLOW")
++    if override:
++        return normalize_workflow(override)
++    active_wf = normalize_workflow(get_active_workflow() or DEFAULT_WORKFLOW)
++    return active_wf
