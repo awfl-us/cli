@@ -19,6 +19,13 @@ the authenticated project API before workspace/SSE selection; the
 `AWFL_PROJECT_ID` environment override still takes precedence. Restart an
 already running CLI consumer after initialization to select the new project.
 
+On normal **interactive startup**, AWFL automatically finds or creates a project
+associated with an existing Git remote. If no project is resolved, it offers
+to initialize a local project using the directory name as the default.
+Declining makes no changes. Headless consumers and one-off commands never
+prompt; a broken existing binding reports an error instead of creating a
+different project silently.
+
 AWFL CLI lets you converse with agent workflows from your terminal, apply code changes safely via tool calls, and watch live progress and events. It is designed for day‑to‑day development in AWFL repositories and any project where agents need to read, write, and run within your workspace.
 
 

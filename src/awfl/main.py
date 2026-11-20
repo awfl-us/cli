@@ -262,6 +262,37 @@ async def main():
     if _should_prompt_login():
         ensure_active_account(prompt_login=True)
 
+    # Resolve the project once before starting either SSE consumer. Existing
+    # Git-remote projects retain their automatic discovery/create behavior.
+    # An interactive terminal without a project receives first-run onboarding;
+    # headless workers and explicit startup commands must never block on input.
+    if not _is_headless() and not os.environ.get('AWFL_BOOTSTRAP_CMD'):
+        import aiohttp
+        from awfl.events.workspace import resolve_project_id
+        async with aiohttp.ClientSession() as project_session:
+            project_id = await resolve_project_id(project_session, create_if_missing=True)
+        if not project_id:
+            from awfl.onboarding_project import prompt_for_project
+            from awfl.local_project import read_local_config
+            try:
+                existing_config = read_local_config()
+            except (OSError, ValueError) as exc:
+                log_unique(f'Invalid .awfl/config.json: {exc}; fix it before starting AWFL.')
+                return
+            if existing_config is not None:
+                log_unique('Configured AWFL project could not be verified. Fix the project binding or credentials.')
+                return
+            try:
+                project_id = await asyncio.to_thread(prompt_for_project)
+            except Exception as exc:
+                log_unique(f'Unable to initialize AWFL project: {exc}')
+                return
+            if not project_id:
+                log_unique('No project selected. Run `awfl project init <name>` to set up later.')
+                return
+            from awfl.auth import set_project_id
+            set_project_id(project_id)
+
     # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
     consumer_shutdown_evt = asyncio.Event()
     project_consumer = asyncio.create_task(consume_events_sse(scope="project"), name="sse-project")
