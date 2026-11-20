@@ -3,9 +3,12 @@ on:
   pull_request:
     paths:
       - 'src/awfl/local_project.py'
+      - 'src/awfl/onboarding_project.py'
+      - 'src/awfl/main.py'
       - 'src/awfl/events/workspace.py'
       - 'src/awfl/cmds/router.py'
       - 'tests/test_local_project.py'
+      - 'tests/test_onboarding_project.py'
       - 'src/awfl/consumer_credentials.py'
       - 'tests/test_credential_rotation.py'
       - 'src/awfl/execution/**'
@@ -19,9 +22,12 @@ on:
     branches: [main]
     paths:
       - 'src/awfl/local_project.py'
+      - 'src/awfl/onboarding_project.py'
+      - 'src/awfl/main.py'
       - 'src/awfl/events/workspace.py'
       - 'src/awfl/cmds/router.py'
       - 'tests/test_local_project.py'
+      - 'tests/test_onboarding_project.py'
       - 'src/awfl/consumer_credentials.py'
       - 'tests/test_credential_rotation.py'
       - 'src/awfl/execution/**'
