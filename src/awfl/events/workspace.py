@@ -231,6 +231,38 @@ async def resolve_project_id(
         log_unique(f"ℹ️ Using AWFL_PROJECT_ID={pid}; skipping git discovery")
         return pid
 
+    # Prefer an explicit local config over remote-origin inference. Validate
+    # ownership before using the ID in SSE and native callback subscriptions.
+    from awfl.local_project import read_local_config
+    try:
+        config = read_local_config()
+    except (OSError, ValueError) as err:
+        log_unique(f'Invalid local project config: {err}')
+        return None
+    if config is not None:
+        project_id = config.get('projectId')
+        if not isinstance(project_id, str) or not project_id.strip():
+            log_unique('Local config requires projectId')
+            return None
+        project_id = project_id.strip()
+        from urllib.parse import quote
+        url = f"{get_api_origin().rstrip('/')}/workflows/projects/{quote(project_id, safe='')}"
+        try:
+            async with session.get(url, headers=get_auth_headers(), timeout=20) as response:
+                if response.status != 200:
+                    log_unique(f'Local project {project_id} unavailable or unauthorized ({response.status})')
+                    return None
+                body = await response.json(content_type=None)
+                project = body.get('project', {}) if isinstance(body, dict) else {}
+                if not isinstance(project, dict) or project.get('id') != project_id:
+                    log_unique('Local project API returned mismatched project ID')
+                    return None
+        except Exception as err:
+            log_unique(f'Could not validate local project: {err}')
+            return None
+        set_project_id(project_id)
+        return project_id
+
     norm = repo_remote()
 
     if not norm:
