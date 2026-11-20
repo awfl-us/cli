@@ -10,6 +10,15 @@ Website: https://awfl.us
 
 A developer-friendly command line for working with AI-powered workflows and codebase-aware agents.
 
+To explicitly create a project without a Git repository or remote, run
+`awfl project init "My Project"` from its directory. This authenticated action
+creates a project in AWFL and writes an exclusive `.awfl/config.json` containing
+its `projectId`. Existing bindings are not overwritten and no Git/GitHub
+operations are performed. On later CLI startup the project is validated against
+the authenticated project API before workspace/SSE selection; the
+`AWFL_PROJECT_ID` environment override still takes precedence. Restart an
+already running CLI consumer after initialization to select the new project.
+
 AWFL CLI lets you converse with agent workflows from your terminal, apply code changes safely via tool calls, and watch live progress and events. It is designed for day‑to‑day development in AWFL repositories and any project where agents need to read, write, and run within your workspace.
 
 

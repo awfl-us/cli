@@ -37,6 +37,7 @@ def _default_help() -> bool:
         "  auth skip on|off\n"
         "  auth set-token <idToken> | auth clear-token\n"
         "  model [name]\n"
+        "  project init <name>  (local project, no Git remote)\n"
         "  workflows | ls\n"
         "  call <workflow> [args...]\n"
         "  stop | cancel | abort\n"
@@ -203,6 +204,20 @@ def handle_command(line: str) -> bool:
         parts = shlex.split(line)
         name = parts[1] if len(parts) >= 2 else None
         return _handle_model([name] if name else [])
+    if cmd == 'project init' or cmd.startswith('project init '):
+        from awfl.local_project import init_local_project
+        try:
+            parts = shlex.split(line)
+            if len(parts) < 3:
+                log_unique('Usage: project init <name>')
+            else:
+                project_id, path = init_local_project(' '.join(parts[2:]))
+                from awfl.auth import set_project_id
+                set_project_id(project_id)
+                log_unique(f'Created project {project_id}; saved {path}. Restart CLI consumers to select it.')
+        except Exception as err:
+            log_unique(f'Project initialization failed: {err}')
+        return True
     if cmd in ("stop", "cancel", "abort"):
         return stop_or_cancel_active()
     if cmd == "deploy workflows":
