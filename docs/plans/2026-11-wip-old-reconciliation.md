@@ -27,3 +27,11 @@ Source `wip-old` 4ba04b7; target `main` 856db29 (34 main-only commits). **Preser
 - Explicitly run existing tests from current `main`; benchmark startup and normal request flow. Don't replace the current consumer/supervisor with historic code to get this feature.
 
 **Exit:** at most a small opt-in local-project enhancement with no degradation of current CLI behavior; otherwise close this repo as no-op. Core typed-tool/workflow work should not wait on this.
+
+## Reconciliation outcome — 2026-11-20
+
+**Accepted and merged only the remote-free local-project functionality:** [CLI PR #26](https://github.com/awfl-us/cli/pull/26), main `0ec97dc34293cff1a336089783e72a543992cabc`. The existing authenticated server POST `/workflows/projects` accepts omitted `remote` and creates user-scoped project records. The CLI now offers **explicit** `awfl project init "Name"`; it does not create a Git repository, push, or prompt automatically. The generated `.awfl/config.json` contains `projectId` and name, written with restrictive permissions and exclusive creation; existing config is not overwritten. On a later resolver startup, this ID takes precedence over Git remote detection and is validated using the authenticated GET `/workflows/projects/:id` before selecting SSE/native callbacks. `AWFL_PROJECT_ID` still overrides it; interactive consumers must be restarted after `project init`.
+
+**Evidence:** `PYTHONPATH=src python3 -m unittest discover -s tests -v` passed **74/74**, including six new local-project tests for no-remote creation, duplicate names, invalid/existing local config, validated selected-project resolution and explicit environment override. [GitHub Actions run 44801604488](https://github.com/awfl-us/cli/actions/runs/44801604488) passed the full suite. No live external project was created in this checkpoint; server API contract was inspected directly. No consumer/supervisor/SSE/credential architecture was replaced.
+
+**Rejected/deferred as originally planned:** historical main.py modularization, first-run interactive GitHub setup, automatic pushes, legacy SSE supervisor, patch files and nonessential start/watch aliases. These cannot be safely restored over newer production code. CLI `wip-old` reconciliation is complete for the useful optional slice; browser-based/web model discovery is tracked independently.
