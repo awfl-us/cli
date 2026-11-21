@@ -245,3 +245,17 @@ awfl set api_origin https://your-server.example.com
 - Homepage: https://github.com/awfl-us/cli
 - Issues: https://github.com/awfl-us/cli/issues
 - Internals overview: see AGENT.md in the repo’s root
+
+### Cloud workspace restore readiness
+
+On a GKE `AWFL_CONSUMER_TYPE=CLOUD` consumer with GCS persistence, the
+project leader restores the workspace from GCS **before** connecting its
+command-capable SSE stream. The session SSE stream and any bootstrap command
+now also wait on the same startup readiness barrier. Failed GCS restores do
+not publish readiness or allow project commands to execute against partially
+restored files. Local CLI sessions without cloud GCS persistence are unaffected.
+
+This readiness condition guarantees completion of the restore, **not** that
+`AGENT.md` exists in the bucket or the repository is at `/workspace`. The
+preload must validate the expected project instructions and working directory
+independently.
