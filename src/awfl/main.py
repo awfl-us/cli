@@ -293,10 +293,26 @@ async def main():
             from awfl.auth import set_project_id
             set_project_id(project_id)
 
-    # Start one project-wide SSE consumer (guarded by a local leader lock) and one session-scoped consumer
+    # A cloud consumer must restore its GCS workspace before opening *either*
+    # SSE stream or running bootstrap commands. The project stream owns the
+    # lock-bound restore; the session stream only observes logs, but starting
+    # it early advertises misleading readiness while the files are incomplete.
+    cloud_restore_required = (os.getenv("AWFL_CONSUMER_TYPE") == "CLOUD"
+                              and bool(os.getenv("AWFL_WORKSPACE_GCS_BUCKET")))
+    workspace_ready = asyncio.Event()
+    if not cloud_restore_required:
+        workspace_ready.set()
+
+    # Start one project-wide SSE consumer (guarded by a local leader lock).
     consumer_shutdown_evt = asyncio.Event()
-    project_consumer = asyncio.create_task(consume_events_sse(scope="project"), name="sse-project")
-    session_consumer = asyncio.create_task(consume_events_sse(scope="session"), name="sse-session")
+    project_consumer = asyncio.create_task(
+        consume_events_sse(scope="project", workspace_ready=workspace_ready), name="sse-project")
+
+    async def _run_session_after_restore():
+        await workspace_ready.wait()
+        return await consume_events_sse(scope="session")
+
+    session_consumer = asyncio.create_task(_run_session_after_restore(), name="sse-session")
     # Treat both consumers as fatal sources; project consumer will still classify skipped-lock/cancel as benign internally
     _attach_crash_on_consumer_exit(project_consumer, "project", consumer_shutdown_evt, fatal=True)
     _attach_crash_on_consumer_exit(session_consumer, "session", consumer_shutdown_evt, fatal=True)
@@ -307,6 +323,7 @@ async def main():
     if bootstrap_cmd:
         async def _run_bootstrap():
             try:
+                await workspace_ready.wait()
                 handle_command(bootstrap_cmd)
                 # Keep session aligned after potential workflow changes
                 set_session(_compute_session_workflow_name())

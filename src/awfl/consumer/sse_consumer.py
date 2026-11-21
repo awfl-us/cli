@@ -34,6 +34,19 @@ from .workspace_sync import WorkspaceSync
 _MCP_INFLIGHT = set()
 
 
+async def restore_workspace_before_events(workspace_sync, workspace_ready):
+    """Open command dispatch only after the initial cloud restore succeeds.
+
+    A failed restore must not signal readiness: the project SSE task fails and
+    its supervisor exits instead of handling tools against partial files.
+    """
+    if workspace_sync and not workspace_sync.task:
+        await workspace_sync.start()
+        log_unique("💾 Project workspace restored; periodic GCS sync active")
+    if workspace_ready is not None:
+        workspace_ready.set()
+
+
 async def _forward_sse_event(obj, evt_type, *, scope, mcp_handler):
     """Route using the SSE *event* field, not a field inside its JSON data.
 
@@ -71,11 +84,12 @@ async def _resolve_project_and_workspace(
     return project_id, ws_id
 
 
-async def consume_events_sse(stream_url=None, scope="session"):
+async def consume_events_sse(stream_url=None, scope="session", *, workspace_ready=None):
     """An intentional idle exit finishes a GKE Job successfully."""
     idle_state = {"fired": False}
     try:
-        result = await _consume_events_sse_impl(stream_url, scope, idle_state=idle_state)
+        result = await _consume_events_sse_impl(
+            stream_url, scope, idle_state=idle_state, workspace_ready=workspace_ready)
         return "idle-timeout" if idle_state["fired"] else result
     except asyncio.CancelledError:
         if not idle_state["fired"]:
@@ -95,7 +109,7 @@ async def consume_events_sse(stream_url=None, scope="session"):
 async def _consume_events_sse_impl(
     stream_url: Optional[str] = None,
     scope: str = "session",  # "session" | "project"
-    *, idle_state=None,
+    *, idle_state=None, workspace_ready=None,
 ):
     """Connect to the awfl-relay SSE stream (workspace-based) and forward events.
 
@@ -391,12 +405,14 @@ async def _consume_events_sse_impl(
                 if not leader_acquired:
                     reason = await _start_or_confirm_lock(project_id_for_lock)
                     if reason == "skipped-lock":
+                        # Another process owns project command execution. This
+                        # process can still subscribe to session log events.
+                        if workspace_ready is not None:
+                            workspace_ready.set()
                         return "skipped-lock"  # benign skip
-                if workspace_sync and not workspace_sync.task:
-                    # Only the project-lock holder may hydrate/sync this workspace.
-                    # Do not accept commands until the initial restore completes.
-                    await workspace_sync.start()
-                    log_unique("💾 Project workspace restored; periodic GCS sync active")
+                # Only the lock owner may hydrate/sync this workspace. Do not
+                # connect project SSE (including MCP commands) until hydrated.
+                await restore_workspace_before_events(workspace_sync, workspace_ready)
 
             # Reset backoff when switching workspaces to be responsive
             if ws_id != last_ws_id:

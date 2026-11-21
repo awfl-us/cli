@@ -16,6 +16,7 @@ on:
       - 'src/awfl/response_handler/**'
       - 'tests/test_execution*.py'
       - 'tests/test_mcp_shared.py'
+      - 'tests/test_workspace_startup_barrier.py'
       - 'tests/test_agent_native_tools.py'
       - '.github/workflows/test-execution.yml'
   push:
@@ -35,6 +36,7 @@ on:
       - 'src/awfl/response_handler/**'
       - 'tests/test_execution*.py'
       - 'tests/test_mcp_shared.py'
+      - 'tests/test_workspace_startup_barrier.py'
       - 'tests/test_agent_native_tools.py'
       - '.github/workflows/test-execution.yml'
 jobs:
